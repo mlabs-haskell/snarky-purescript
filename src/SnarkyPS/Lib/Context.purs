@@ -33,6 +33,7 @@ foreign import assertMany :: Array (Context Void) -> Context Void
    `Context Void` indicates an expression that does not return a value inside of a snarky context
 -}
 
+-- TODO: Rename 'Void' to 'Assertion'
 foreign import data Void :: Type
 
 instance Functor Context where

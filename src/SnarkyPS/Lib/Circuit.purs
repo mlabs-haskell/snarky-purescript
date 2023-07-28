@@ -7,6 +7,7 @@ import Type.Proxy
 import Partial
 import Partial.Unsafe
 import Data.Maybe
+import Control.Promise
 
 import SnarkyPS.Lib.Context
 import SnarkyPS.Lib.Field
@@ -14,9 +15,8 @@ import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.FieldClasses
 import SnarkyPS.Lib.Bool
 
--- TODO: remove later
 import Effect
-
+import Effect.Aff
 
 foreign import data Circuit :: Type -> Type -> Type
 
@@ -28,7 +28,8 @@ foreign import mkCircuit_ :: forall a b c. Fn3 (Fn2 a b c) (Provable a) (Provabl
 
 foreign import data Proof :: Type -> Type -> Type
 
-foreign import prove_ :: forall a b. Fn3 (Circuit a b) a b (Proof a b)
+-- TODO: Needs to be in aff or return a promise or both
+foreign import prove_ :: forall a b. Fn3 (Circuit a b) a b (Promise (Proof a b))
 
 foreign import bindToConstant :: Field -> Field
 
@@ -53,8 +54,6 @@ mkCircuit :: forall a b c
              -> Circuit a b
 mkCircuit f = runFn3 mkCircuit_ (mkFn2 f) (mkProvable @a) (mkProvable @b)
 
-
-
 mkProvable :: forall @t. C.CircuitValue t => Provable t
 mkProvable = Provable {
     toFields: C.toFields (Proxy :: Proxy t)
@@ -65,5 +64,6 @@ mkProvable = Provable {
   , toInput: C.toInput
 }
 
-prove :: forall a b. Circuit a b -> a -> b -> Proof a b
-prove = runFn3 prove_
+-- TODO: Needs to run in aff or return a promise or both
+prove :: forall a b. Circuit a b -> a -> b -> Aff (Proof a b)
+prove c a b = toAff $ runFn3 prove_ c a b

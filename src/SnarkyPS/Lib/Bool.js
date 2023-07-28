@@ -54,8 +54,10 @@ export function assertTrue(msg)  {
 
 
 export function assertFalse(msg) {
-  return function(b1) {
-    return b1.assertFalse(msg);
+  return function(b) {
+    const f1 = b.assertTrue;
+    const f2 = f1.bind(b,msg)
+    return f2();
   };
 };
 
