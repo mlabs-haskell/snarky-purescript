@@ -34,6 +34,8 @@ circuit :: Circuit
   -- We ignore the public input here.
   -- It can't be `Void` cause it's not `CircuitValue`.
   Field Field
-circuit = mkCircuit $ \_ pri  -> do
+circuit = mkCircuit $ \pub pri  -> do
+  zeroField <- field $ BigInt.fromInt 0
+  assertEqField "public input should be 0" pub zeroField
   state <- init
   checkSquare state pri
