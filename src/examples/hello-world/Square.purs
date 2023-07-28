@@ -1,7 +1,7 @@
 module Circuit where
 
 import Data.BigInt as BigInt
-import Prelude (discard, bind, void, ($), pure)
+import Prelude (bind, discard, pure, ($))
 import SnarkyPS.Lib.Circuit (Circuit, mkCircuit)
 import SnarkyPS.Lib.Context (Context, Void)
 import SnarkyPS.Lib.Field (Field, assertEqField, field)
@@ -19,10 +19,7 @@ checkSquare numState guess = do
   -- Fetch value from state and check that it's valid.
   num <- getAndAssertEqState numState
 
-  -- This is a bit confusing: we have to void out a `Void` to satisfy the ps
-  -- compiler since `Void` is from snakyJS.
-  -- We can probably work around this by providing our own `discard`.
-  void $ assertEqField "bad guess" num guess
+  assertEqField "bad guess" num guess
 
   setState guess numState
 
@@ -30,7 +27,7 @@ init :: Context (State Field)
 init = do
   state <- newState
   initial <- field $ BigInt.fromInt 3
-  void $ setState initial state
+  setState initial state
   pure state
 
 circuit :: Circuit

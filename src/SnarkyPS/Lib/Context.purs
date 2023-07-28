@@ -1,8 +1,6 @@
 module SnarkyPS.Lib.Context (Void, Context, lift2Context, assertMany, assertAndThen) where
 
 import Prelude hiding (Void)
-import Control.Monad (void)
-
 
 {- This module defines a Context monad that allows us to properly represent computations in the
    'Snarky Context'. The underlying representation is essentially the Identity monad, but unlike
@@ -47,6 +45,9 @@ instance Applicative Context where
 
 instance Bind Context where
   bind = bindContext
+
+instance Discard Void where
+  discard = bind
 
 instance Monad Context
 
