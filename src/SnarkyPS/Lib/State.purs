@@ -1,8 +1,6 @@
 module SnarkyPS.Lib.State where
 
-import Prelude
-
-import SnarkyPS.Lib.Context (Context)
+import SnarkyPS.Lib.Context (Context, Void)
 
 foreign import data State :: Type -> Type
 
