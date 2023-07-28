@@ -1,5 +1,4 @@
 import { Field } from "../../snarkydist/node/lib/field.js";
-import { UInt64, UInt32, Int64 } from "../../snarkydist/node/lib/int.js";
 import { Bool } from "../../snarkydist/node/lib/bool.js";
 
 export function newField(x) {
@@ -25,146 +24,10 @@ export function eqField(s) {
   }
 };
 
-export function showField(f1) {
+export function unsafeShowField(f1) {
   return f1.toString()
 };
 
-// U64
-
-export function fromFieldU64(i) {
-  return UInt64.from(i);
-};
-
-export function fromBigIntU64(i) {
-  return UInt64.from(i);
-};
-
-export function unsafeU64(i) {
-  return UInt64.from(i);
-};
-
-export function toBigIntU64(i) {
-  return i.toBigInt();
-};
-
-export function toFieldU64(i) {
-  return i.value;
-};
-
-export function u64toU32(i) {
-  return i.ToUInt32;
-};
-
-export function u64ToU32Clamped(i) {
-  return i.toUInt32Clamped()
-};
-
-export function toInputU64(i) {
-  return UInt64.toInput(i);
-};
-
-export function toJSONU64(i) {
-  return UInt64.toJSON(i);
-};
-
-
-export function divModU64(self) {
-  return function(other) {
-    return self.divMod(other);
-  };
-};
-
-export function divU64(self) {
-  return function(other) {
-    return self.div(other);
-  };
-};
-
-export function modU64(self) {
-  return function(other) {
-    return self.mod(other);
-  };
-};
-
-export function addU64(self) {
-  return function(other) {
-    return self.add(other);
-  };
-};
-
-export function subU64(self) {
-  return function(other) {
-    return self.sub(other);
-  };
-};
-
-export function mulU64(self) {
-  return function(other) {
-    return self.mul(other);
-  };
-};
-
-export function ltU64(self) {
-  return function (other) {
-    return self.lessThan(other);
-  };
-};
-
-export function lteU64(self) {
-  return function (other) {
-    return self.lessThanOrEqual(other);
-  };
-};
-
-export function gtU64(self) {
-  return function (other) {
-    return self.greaterThan(other);
-  };
-};
-
-export function gteU64(self) {
-  return function (other) {
-    return self.greaterThanOrEqual(other);
-  };
-};
-
-export function assertLtU64(msg) {
-  return function (self) {
-    return function (other) {
-      return self.assertLessThan(other,msg);
-    };
-  };
-};
-
-export function assertLteU64(msg) {
-  return function (self) {
-    return function (other) {
-      return self.assertLessThanOrEqual(other,msg);
-    };
-  };
-};
-
-export function assertGtU64(msg) {
-  return function (self) {
-    return function (other) {
-      return self.assertGreaterThan(other,msg);
-    };
-  };
-};
-
-export function assertGteU64(msg) {
-  return function (self) {
-    return function (other) {
-      return self.assertGreaterThanOrEqual(other,msg);
-    };
-  };
-};
-
-export function checkU64(n) {
-  return function () {
-    UInt64.check(n);
-  };
-};
 
 // Field
 
@@ -325,92 +188,33 @@ export function assertGteField(msg) {
   };
 };
 
-
-// Bool  (Note that the repetitiveness is intentional, some similarly named functions don't return the same type. We don't *have* types here so duplicating the functions helps avoid mistakes.)
-
-export function fromBoolean(b) {
-  return new Bool(b);
+export function checkField_(field) {
+  return;
 };
 
-// Bool -> ?Boolean?
-export function isConstantBool(b) {
-  return b.isConstant();
-};
-
-// Bool -> Field
-export function toFieldBool(b) {
-  return b.toField();
-};
-
-// Bool -> Bool
-export function notBool(b) {
-  return b.not();
-};
-
-// Bool -> Bool -> Bool
-export function andBool(b1) {
-  return function(b2) {
-    return b1.and(b2);
-  };
-};
-
-export function orBool(b1) {
-  return function(b2) {
-    return b1.or(b2);
-  };
-};
-
-// String -> Bool -> Bool -> Bool
-export function assertEqBool(msg) {
-  return function(b1) {
-    return function(b2) {
-      return b1.assertEquals(b2);
-    };
-  };
-};
-
-// String -> Bool -> Bool
-export function assertTrue(msg) {
-  return function(b1) {
-    return b1.assertTrue(msg);
-  };
-};
-
-
-export function assertFalse(msg) {
-  return function(b1) {
-    return b1.assertFalse(msg);
-  };
-};
-
-export function equalsBool(b1) {
-  return function(b2) {
-    return b1.equals(b2);
-  };
-};
-
-// Bool -> Int
-export function sizeInFieldsBool(b) {
-  return b.sizeInFields()
-};
-
-// Bool -> Array Field
-export function toFieldsBool(b) {
-  return b.toFields()
-};
-
-// Bool -> String
-export function toStringBool(b) {
-  return b.toString()
-};
+// Bool
 
 export function toBoolean(b) {
   return b.toBoolean();
 };
 
-// Bool -> Bool (catch the error? can we?)
-export function checkBool(b) {
-  return function() {
-     Bool.check(b);
-  };
+export function fromBoolean(b) {
+  return new Bool(b);
+};
+
+// Misc functions for working with opaques
+export function sizeToInt(size) {
+  return size
+};
+
+export function intToSize(num) {
+  return num
+};
+
+export function arrToFields(arr){
+  return arr
+};
+
+export function fieldsToArr(fields){
+  return fields
 };

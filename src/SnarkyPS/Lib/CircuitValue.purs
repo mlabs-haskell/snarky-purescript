@@ -1,11 +1,12 @@
 module SnarkyPS.Lib.CircuitValue where
 
+import Prelude hiding (Void)
+
 import Data.BigInt
 import Data.BigInt as BI
 import Type.Data.Symbol
 import Type.Proxy
 import Type.RowList (class RowToList, class ListToRow, class RowListNub, Cons, Nil, RowList)
-import Prelude
 import Data.Maybe
 import Effect
 import Record
@@ -14,13 +15,43 @@ import Data.Array ((:))
 import Data.Bifunctor
 import Unsafe.Coerce
 import Safe.Coerce
-import SnarkyPS.Lib.Field
 import Record.Unsafe
 import Data.Tuple
 import Data.Array (null, uncons, length, take, drop)
 import Simple.JSON
 
+import SnarkyPS.Lib.Field
+import SnarkyPS.Lib.Context
+import SnarkyPS.Lib.Int
+import SnarkyPS.Lib.Bool
+import SnarkyPS.Lib.FieldClasses
+
 foreign import  error :: forall t1 t2. t1 -> t2
+
+{- Functions for working with opaque types, do not export  -}
+foreign import sizeToInt :: SizeInFields -> Int
+foreign import intToSize :: Int -> SizeInFields
+
+withSize :: SizeInFields -> (Int -> Int) -> SizeInFields
+withSize size f = intToSize $ f (sizeToInt size)
+
+
+foreign import arrToFields :: Array Field -> Fields
+foreign import fieldsToArr :: Fields -> Array Field
+
+withFields :: Fields -> (Array Field -> Array Field) -> Fields
+withFields fields f = arrToFields $ f (fieldsToArr fields)
+
+{- We *could* exclude empty records but it'd make the instances even more confusing,
+   so we just cheat in the case of checking the empty record and FFI in a function that
+   doesn't return anything.
+-}
+foreign import checkEmptyRec :: forall (row :: Row Type). Record row -> Context Void
+
+{- Hash stuff for toInput -}
+foreign import emptyHash :: HashInput
+
+foreign import appendHash :: HashInput -> HashInput -> HashInput
 
 -- Don't export the constructor!
 newtype Struct :: Row Type -> Type
@@ -50,32 +81,37 @@ not-all-that-complex types)
 -}
 class CircuitValueRL :: RowList Type -> Row Type -> Constraint
 class CircuitValueRL list row | list -> row where
-  toFieldsL :: Proxy list -> Record row -> Array Field
+  toFieldsL :: Proxy list -> Record row -> Fields
 
-  sizeInFieldsL :: Proxy list ->  Int
+  sizeInFieldsL :: Proxy list -> SizeInFields
 
-  toJSONL :: Proxy list -> Record row -> String
+  toJSONL :: Proxy list -> Record row -> JSON
 
-  fromJSONL :: Proxy list -> Proxy row -> String -> Maybe (Record row)
+  fromJSONL :: Proxy list -> Proxy row -> JSON -> Maybe (Record row)
 
-  -- Is this necessary? idk
-  checkL :: Proxy list -> Record row -> Effect Unit
+  toInputL :: Proxy list -> Record row -> HashInput
 
-  fromFieldsL :: Proxy list -> Proxy row -> Array Field -> Maybe (Record row)
+  checkL :: Proxy list -> Record row -> Context Void
+
+  fromFieldsL :: Proxy list -> Proxy row -> Fields -> Maybe (Record row)
 
 instance CircuitValueRL Nil () where
-  toFieldsL _ _ = []
+  toFieldsL _ _ = arrToFields []
 
-  sizeInFieldsL _ = 0
+  sizeInFieldsL _ = intToSize 0
 
   toJSONL _ = error "TODO 1"
 
   fromJSONL _ = error "TODO 2"
 
-  checkL _  _ = pure unit
+  toInputL _ _ = emptyHash
 
-  fromFieldsL _ _ [] = Just {}
-  fromFieldsL _ _ _  = Nothing
+  checkL _  = checkEmptyRec
+
+  fromFieldsL _ _ fields = case fieldsToArr fields of
+    [] -> Just {}
+    anythingElse -> Nothing
+
 else instance (
     CircuitValue t
   , PR.Lacks label rowRest
@@ -84,8 +120,12 @@ else instance (
   , IsSymbol label
   , CircuitValueRL listRest rowRest
   ) => CircuitValueRL (Cons label t listRest) rowFull where
-  toFieldsL _ rec = toFields (Proxy :: Proxy t) arg <> toFieldsL (Proxy :: Proxy listRest) rowRest
+  toFieldsL _ rec = arrToFields $ fieldsT <> fieldsRest
     where
+      fieldsT = fieldsToArr $ toFields (Proxy :: Proxy t) arg
+
+      fieldsRest = fieldsToArr $ toFieldsL (Proxy :: Proxy listRest) rowRest
+     
       key :: Proxy label
       key = Proxy
 
@@ -95,45 +135,70 @@ else instance (
       rowRest :: Record rowRest
       rowRest = delete key rec
 
-  sizeInFieldsL _ = sizeInFields (Proxy :: Proxy t) + sizeInFieldsL (Proxy :: Proxy listRest)
+  sizeInFieldsL _ =
+    let sizeT = sizeToInt $ sizeInFields (Proxy :: Proxy t)
+        sizeRest =  sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
+    in intToSize (sizeT + sizeRest)
 
   toJSONL _ = error "TODO 3"
 
   fromJSONL _ = error "TODO 4"
 
+  toInputL _ rec = appendHash thisHash restHash
+    where
+      thisHash = toInput arg
+
+      restHash = toInputL listRest rowRest
+
+      key :: Proxy label
+      key = Proxy
+
+      arg :: t
+      arg = get key rec
+
+      listRest :: Proxy listRest
+      listRest = Proxy
+
+      rowRest :: Record rowRest
+      rowRest = delete key rec
+
+
   checkL _ rec = do
     let key = Proxy :: Proxy label
-    check (get key rec)
-    checkL (Proxy :: Proxy listRest) (delete key rec)
+    assertAndThen (check (get key rec)) $ do
+      checkL (Proxy :: Proxy listRest) (delete key rec)
 
-  fromFieldsL _ _ arr = case length arr >= sizeT of
-    true -> case fromFieldsL (Proxy :: Proxy listRest) (Proxy :: Proxy rowRest) (drop sizeT arr) of
+  fromFieldsL _ _ fields = case length arr >= sizeT of
+    true -> case fromFieldsRest of
       Nothing -> Nothing
-      Just recRest -> case fromFields (Proxy :: Proxy t) (take sizeT arr) of
+      Just recRest -> case fromFields proxyT (arrToFields $ take sizeT arr) of
        Nothing -> Nothing
-       Just t  ->  Just $ insert (Proxy :: Proxy label) t recRest
+       Just t  ->  Just $ insert label t recRest
     false -> Nothing
    where
-     sizeT = sizeInFields (Proxy :: Proxy t)
+     label  = Proxy :: Proxy label
+     proxyT = Proxy :: Proxy t
+     listRest = Proxy :: Proxy listRest
+     rowRest  = Proxy :: Proxy rowRest
+     arr   = fieldsToArr fields
+     sizeT = sizeToInt $ sizeInFields proxyT
+     fromFieldsRest = fromFieldsL listRest rowRest  (arrToFields $ drop sizeT arr)
 
 class CircuitValue :: Type -> Constraint
 class CircuitValue t where
-  sizeInFields :: Proxy t -> Int
+  sizeInFields :: Proxy t -> SizeInFields
 
-  toFields :: Proxy t -> t -> Array Field
+  toFields :: Proxy t -> t -> Fields
 
-  -- no toAuxilliary for simplicity atm
+  toInput :: t -> HashInput
 
-  -- TODO: HashInput type toInput
+  toJSON :: t -> JSON
 
-  toJSON :: t -> String
+  fromJSON :: JSON -> Maybe t
 
-  fromJSON :: String -> Maybe t
+  check :: t -> Context Void
 
-  -- not sure about the types here?
-  check :: t -> Effect Unit
-
-  fromFields :: Proxy t -> Array Field -> Maybe t
+  fromFields :: Proxy t -> Fields -> Maybe t
 
 instance (
     RowToList row list
@@ -147,22 +212,27 @@ instance (
 
   fromJSON = error "TODO 7"
 
+  toInput = toInputL (Proxy :: Proxy list)
+
   check rec = checkL (Proxy :: Proxy list) rec
 
   fromFields _ = fromFieldsL (Proxy :: Proxy list) (Proxy :: Proxy row)
 else instance FieldLike t => CircuitValue t where
-  toFields _ t = [toField t]
+  toFields _ t = arrToFields [toField t]
 
-  sizeInFields _ = 1
+  sizeInFields _ = intToSize 1
 
   toJSON = error "TODO 9"
 
   fromJSON = error "TODO 10"
 
+  toInput = fieldLikeToInput
+
   check = checkField
 
-  fromFields _ [t] = Just $ fromField t
-  fromFields _ other = Nothing
+  fromFields _ fields = case fieldsToArr fields of
+    [t] -> Just $ fromField t
+    anythingElse ->  Nothing
 
 
 forgetStruct :: forall (row :: Row Type). Struct row -> Array Field
@@ -176,10 +246,10 @@ instance ( ListToRow (Cons l t listRest) rowFull
          , PR.Cons l t rowRest rowFull
          , CircuitValueRL listRest rowRest
          , CircuitValue t) => Offset (Cons l t listRest) l where
-  getOffset _ _ = let i = 1 + sizeT + sizeInFieldsL (Proxy :: Proxy listRest)
-                      sizeT = case sizeInFields (Proxy :: Proxy t) of
+  getOffset _ _ = let sizeT = case sizeToInt $ sizeInFields (Proxy :: Proxy t) of
                         0 -> 0
                         n -> n - 1
+                      i = 1 + sizeT + sizeToInt (sizeInFieldsL (Proxy :: Proxy listRest))
                   in Tuple i sizeT
 else instance (Offset listRest  symbol) => Offset (Cons l t listRest) symbol where
   getOffset _ _ =  getOffset (Proxy :: Proxy listRest) (Proxy :: Proxy symbol)
@@ -194,7 +264,7 @@ getIndex  _ = case offset of
   Tuple i size -> Tuple (totalSize - i) ((totalSize - i) + size)
  where
    offset = getOffset (Proxy :: Proxy list) (Proxy :: Proxy label)
-   totalSize = sizeInFields (Proxy :: Proxy (Record row))
+   totalSize = sizeToInt $ sizeInFields (Proxy :: Proxy (Record row))
 
 -- Dealing with impure Structs might not be worth it? The constraints would be difficult to write
 
@@ -205,7 +275,6 @@ test1 = testOffset (Proxy :: Proxy "one") myrec
 
 type MyRec1 = (one :: U64, two :: U64, three :: U64)
 type MyRec2 = (a :: U64, b :: U64, c :: {c1 :: U64, c2 :: U64}, d :: U64, e :: U64 )
-
 
 myrec :: {one :: U64, two :: U64, three :: U64}
 myrec = {one: u64 1, two: u64 2, three: u64 3}
