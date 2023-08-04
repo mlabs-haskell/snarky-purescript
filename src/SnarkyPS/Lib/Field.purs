@@ -12,23 +12,17 @@ import Data.Argonaut.Encode.Class
 import Data.Argonaut.Decode.Class
 
 import SnarkyPS.Lib.Context
-{-
-
-ALL USER-FACING FUNCTIONS THAT CAN BE USED TO DIRECTLY CONSTRUCT A FIELD OR FIELDLIKE MUST RETURN A FIELDLIKE
-WRAPPED IN `Context`
-
--}
 
 foreign import data Field :: Type
 
 {- We have to define the primitive FieldLikes here to avoid circular dependencies
-   while keeping  the module structure sane.
+   while keeping the module structure sane.
 -}
 foreign import data Bool :: Type
 
 foreign import data HashInput :: Type
 
-foreign import newField :: forall t. t -> Context Field
+foreign import newField :: forall t. t -> Field
 
 foreign import error :: forall t. String -> t
 
@@ -69,7 +63,7 @@ foreign import data Fields :: Type
 foreign import data ConstantField :: Type
 
 -- DO NOT EXPORT!!!! For instances only
-foreign import coerceToField :: forall t. t -> Context Field
+foreign import coerceToField :: forall t. t -> Field
 
 foreign import eqField :: Field -> Field -> Bool
 
@@ -87,6 +81,8 @@ foreign import isConstantField :: Field -> Boolean
 
 foreign import toConstantField :: Field -> ConstantField
 -}
+
+foreign import toBigIntField :: Field -> BigInt
 
 foreign import negField :: Field -> Field
 
@@ -106,7 +102,7 @@ foreign import toInputField :: Field -> HashInput
 
 foreign import toJSONField :: Field -> JSON
 
-foreign import fromJSONField :: JSON -> Context Field -- Partial / bad, need to fix things in the JS
+foreign import fromJSONField :: JSON ->  Field -- Partial / bad, need to fix things in the JS
 
 foreign import divModField :: Field -> Field -> DivModResult Field
 
@@ -124,17 +120,17 @@ foreign import gteField :: Field -> Field -> Bool
 
 -- The various 'assertX' & `check`` functions return void in JS, not a bool.
 
-foreign import assertEqField :: String -> Field -> Field -> Context Void
+foreign import assertEqField :: String -> Field -> Field -> Assertion
 
-foreign import assertLtField :: String -> Field -> Field -> Context Void
+foreign import assertLtField :: String -> Field -> Field -> Assertion
 
-foreign import assertLteField :: String -> Field -> Field -> Context Void
+foreign import assertLteField :: String -> Field -> Field -> Assertion
 
-foreign import assertGtField :: String -> Field -> Field -> Context Void
+foreign import assertGtField :: String -> Field -> Field -> Assertion
 
-foreign import assertGteField :: String -> Field -> Field -> Context Void
+foreign import assertGteField :: String -> Field -> Field -> Assertion
 
-foreign import checkField_ :: Field -> Context Void
+foreign import checkField_ :: Field -> Assertion
 {-
   Bool Functions (for instances)
 
@@ -155,21 +151,24 @@ instance Show Bool where
 {- Vanilla types that can be turned into a (constant) Field. Just a convenience.  -}
 class MakeField :: Type -> Constraint
 class MakeField t where
-  field :: t -> Context Field
+  field :: t ->  Field
 
 instance MakeField BigInt where
+  field = coerceToField
+
+instance MakeField Int where
   field = coerceToField
 
 instance MakeField Number where
   field = coerceToField
 
 instance MakeField Field where
-  field = pure
+  field = identity
 
 instance DigitSym s => MakeField (Proxy s) where
   field _ = symToField @s
 
-symToField :: forall (@s :: Symbol). DigitSym s => Context Field
+symToField :: forall (@s :: Symbol). DigitSym s => Field
 symToField  = case BI.fromString $ reflectSymbol (Proxy :: Proxy s) of
     Nothing -> error "impossible"
     Just x -> field x

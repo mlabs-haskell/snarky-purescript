@@ -22,13 +22,17 @@ export function notBool(b) {
 // Bool -> Bool -> Bool
 export function andBool(b1) {
   return function(b2) {
-    return b1.and(b2);
+    const f1 = b1.and;
+    const f2 = f1.bind(b1,b2);
+    return f2();
   };
 };
 
 export function orBool(b1) {
   return function(b2) {
-    return b1.or(b2);
+    const f1 = b1.or;
+    const f2 = f1.bind(b1,b2);
+    return f2();
   };
 };
 
@@ -76,12 +80,16 @@ export function sizeInFieldsBool(b) {
 
 // Bool -> Array Field
 export function toFieldsBool(b) {
-  return b.toFields()
+  const f1 = b.toFields;
+  const f2 = f1.bind(b);
+  return f2()
 };
 
 // Bool -> String
 export function toStringBool(b) {
-  return b.toString()
+  const f1 = b.toString;
+  const f2 = f1.bind(b);
+  return f2()
 };
 
 // Bool -> Bool (catch the error? can we?)
@@ -89,6 +97,6 @@ export function checkBool(b) {
      return B.check(b);
 };
 
-export function fromFieldBool(b) {
-  return B.fromFields([b]);
+export function fromFieldBool(fields) {
+  return B.fromFields([fields]);
 };

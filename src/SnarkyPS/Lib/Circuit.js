@@ -1,5 +1,6 @@
 import { public_, circuitMain, Circuit, Keypair, Proof, VerificationKey } from "../../snarkydist/node/lib/circuit.js";
 import { Provable } from "../../snarkydist/node/lib/provable.js";
+import { Field } from "../../snarkydist/node/lib/field.js";
 // func needs to be an UNCURRIED 2 argument function where
 // the first arg is the private input(s) and the second is the public
 // input(s)
@@ -37,6 +38,6 @@ export function bindToConstant(field) {
   return field;
 };
 
-export function proveArray (prover) {
-  return Provable.Array(prover,1);
+export function mkProvable (size) {
+  return Provable.Array(Field,size)
 };

@@ -1,4 +1,4 @@
-module SnarkyPS.Lib.Context (Void, Context, lift2Context, assertMany, assertAndThen) where
+module SnarkyPS.Lib.Context (Assertion, assertMany, assertAndThen) where
 
 import Prelude hiding (Void)
 import Control.Monad (void)
@@ -12,7 +12,9 @@ import Control.Monad (void)
    mixing up computations in the object language (snarky) with computations in the model language.
 
    Really this should be a constrained monad, but those aren't pleasant to work with in PS.
--}
+
+   TEMPORARILY DEPRECATED: We need some monad eventually to control effects, but there's not much of a point
+                           to it now as the computations are pure.
 
 foreign import data Context :: Type -> Type
 
@@ -25,13 +27,6 @@ foreign import lift2Context :: forall f a b c. (a -> b -> c) -> Context a -> Con
 foreign import applyContext :: forall b a. Context (a -> b) -> Context a -> Context b
 
 foreign import bindContext :: forall a b. Context a -> (a -> Context b) -> Context b
-
-foreign import assertMany :: Array (Context Void) -> Context Void
-
-{- N.B. We use our own void so users don't attempt to do something with `absurd`
-
-   `Context Void` indicates an expression that does not return a value inside of a snarky context
--}
 
 -- TODO: Rename 'Void' to 'Assertion'
 foreign import data Void :: Type
@@ -50,7 +45,17 @@ instance Bind Context where
 
 instance Monad Context
 
-assertAndThen :: forall a. Context Void -> Context a -> Context a
+assertAndThen :: forall a. Assertion -> Context a -> Context a
 assertAndThen cv x = do
   void cv
   x
+
+
+-}
+
+-- Underlying type is JS void
+foreign import data Assertion :: Type
+
+foreign import assertMany :: Array Assertion -> Assertion
+
+foreign import assertAndThen :: forall (t :: Type). Assertion -> t -> t

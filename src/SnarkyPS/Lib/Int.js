@@ -20,11 +20,15 @@ export function toFieldU64(i) {
 };
 
 export function u64toU32(i) {
-  return i.ToUInt32;
+  const f1 = i.toUInt32;
+  const f2 = f1.bind(i);
+  return f2()
 };
 
 export function u64ToU32Clamped(i) {
-  return i.toUInt32Clamped()
+  const f1 = i.toUInt32Clamped;
+  const f2 = f1.bind(i);
+  return f2()
 };
 
 export function toInputU64(i) {
@@ -42,68 +46,90 @@ export function fromJSONU64(js) {
 
 export function divModU64(self) {
   return function(other) {
-    return self.divMod(other);
+    const f1 = self.divMod;
+    const f2 = f1.bind(self,other);
+    return f2();
   };
 };
 
 export function divU64(self) {
   return function(other) {
-    return self.div(other);
+    const f1 = self.div;
+    const f2 = f1.bind(self,other);
+    return f2();
   };
 };
 
 export function modU64(self) {
   return function(other) {
-    return self.mod(other);
+    const f1 = self.mod;
+    const f2 = f1.bind(self,other);
+    return f2()
   };
 };
 
 export function addU64(self) {
   return function(other) {
-    return self.add(other);
+    const f1 = self.add;
+    const f2 = f1.bind(self,other);
+    return f2();
   };
 };
 
 export function subU64(self) {
   return function(other) {
-    return self.sub(other);
+    const f1 = self.sub;
+    const f2 = f1.bind(self,other)
+    return f2();
   };
 };
 
 export function mulU64(self) {
   return function(other) {
-    return self.mul(other);
+    const f1 = self.mul;
+    const f2 = f1.bind(self,other);
+    return f2();
   };
 };
 
 export function ltU64(self) {
   return function (other) {
-    return self.lessThan(other);
+    const f1 = self.lessThan;
+    const f2 = f1.bind(self,other);
+    return f2();
   };
 };
 
 export function lteU64(self) {
   return function (other) {
-    return self.lessThanOrEqual(other);
+    const f1 = self.lessThanOrEqual;
+    const f2 = f1.bind(self,other);
+    return f2()
   };
 };
 
 export function gtU64(self) {
   return function (other) {
-    return self.greaterThan(other);
+    const f1 = self.greaterThan;
+    const f2 = f1.bind(self,other);
+    return f2()
   };
 };
 
 export function gteU64(self) {
   return function (other) {
-    return self.greaterThanOrEqual(other);
+    const f1 = self.greaterThanOrEqual;
+    const f2 = f1.bind(self,other);
+    return f2()
   };
 };
 
 export function assertLtU64(msg) {
   return function (self) {
     return function (other) {
-      return self.assertLessThan(other,msg);
+      const f1 = self.assertLessThan;
+      const f2 = f1.bind(self,other);
+      return f2()
     };
   };
 };
@@ -111,7 +137,9 @@ export function assertLtU64(msg) {
 export function assertLteU64(msg) {
   return function (self) {
     return function (other) {
-      return self.assertLessThanOrEqual(other,msg);
+      const f1 = self.assertLessThanOrEqual;
+      const f2 = f1.bind(self,other);
+      return f2()
     };
   };
 };
@@ -119,7 +147,9 @@ export function assertLteU64(msg) {
 export function assertGtU64(msg) {
   return function (self) {
     return function (other) {
-      return self.assertGreaterThan(other,msg);
+      const f1 = self.assertGreaterThan;
+      const f2 = f1.bind(self,other);
+      return f2();
     };
   };
 };
@@ -127,7 +157,9 @@ export function assertGtU64(msg) {
 export function assertGteU64(msg) {
   return function (self) {
     return function (other) {
-      return self.assertGreaterThanOrEqual(other,msg);
+      const f1 = self.assertGreaterThanOrEqual;
+      const f2 = f1.bind(self,other);
+      return f2()
     };
   };
 };

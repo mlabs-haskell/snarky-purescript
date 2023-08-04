@@ -25,11 +25,11 @@ foreign import andBool :: Bool -> Bool -> Bool
 
 foreign import orBool :: Bool -> Bool -> Bool
 
-foreign import assertEqBool :: String -> Bool -> Bool -> Context Void
+foreign import assertEqBool :: String -> Bool -> Bool -> Assertion
 
-foreign import assertTrue :: String -> Bool -> Context Void
+foreign import assertTrue :: String -> Bool -> Assertion
 
-foreign import assertFalse :: String -> Bool -> Context Void
+foreign import assertFalse :: String -> Bool -> Assertion
 
 foreign import equalsBool :: Bool -> Bool -> Bool
 
@@ -37,6 +37,6 @@ foreign import sizeInFieldsBool :: Bool -> SizeInFields
 
 foreign import toFieldsBool :: Bool -> Array Field
 
-foreign import checkBool :: Bool -> Context Void
+foreign import checkBool :: Bool -> Assertion
 
 foreign import fromFieldBool :: Field -> Bool

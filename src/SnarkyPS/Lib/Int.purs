@@ -35,7 +35,7 @@ foreign import fromBigIntU64  :: BigInt -> U64
 -- Unsafe, for type class instances only, don't export (if needed in another module put it in that module's ffi)
 foreign import unsafeU64 :: forall t. t ->  U64
 
-foreign import safeU64 :: forall t. t -> Context U64
+foreign import safeU64 :: forall t. t ->  U64
 
 foreign import fromFieldU64 :: Field -> U64
 
@@ -45,7 +45,7 @@ foreign import toInputU64 :: U64 -> HashInput
 
 foreign import toJSONU64 :: U64 -> JSON
 
-foreign import fromJSONU64 :: JSON -> Context U64
+foreign import fromJSONU64 :: JSON ->  U64
 
 foreign import divModU64 :: U64 -> U64 -> (DivModResult U64)
 
@@ -69,15 +69,15 @@ foreign import gtU64 :: U64 -> U64 -> Bool
 
 foreign import gteU64 :: U64 -> U64 -> Bool
 
-foreign import assertLtU64 :: String -> U64 -> U64 -> Context Void
+foreign import assertLtU64 :: String -> U64 -> U64 -> Assertion
 
-foreign import assertLteU64 :: String -> U64 -> U64 -> Context Void
+foreign import assertLteU64 :: String -> U64 -> U64 -> Assertion
 
-foreign import assertGtU64 :: String -> U64 -> U64 -> Context Void
+foreign import assertGtU64 :: String -> U64 -> U64 -> Assertion
 
-foreign import assertGteU64 :: String -> U64 -> U64 -> Context Void
+foreign import assertGteU64 :: String -> U64 -> U64 -> Assertion
 
-foreign import checkU64 :: U64 -> Context Void
+foreign import checkU64 :: U64 -> Assertion
 
 {- Convenience class for coercing PS values to FieldLike values -}
 class CoerceU64 (t :: Type) where

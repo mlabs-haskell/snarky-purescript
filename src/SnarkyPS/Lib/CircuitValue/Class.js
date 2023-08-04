@@ -1,0 +1,25 @@
+import { Struct } from "../../snarkydist/node/lib/circuit_value.js";
+import { HashInput } from "../../snarkydist/node/bindings/lib/provable-snarky.js"
+
+export function error(x) {
+  console.log('ERROR:');
+  console.log(x);
+};
+
+export function checkEmptyRec(rec) {
+  return;
+};
+
+export function checkEmptyVar(v) {
+  return;
+};
+
+export function appendHash(x) {
+  return function(y) {
+    return HashInput.append(x,y);
+  };
+};
+
+export function emptyHash() {
+  return HashInput.empty
+}

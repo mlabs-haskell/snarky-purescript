@@ -30,8 +30,10 @@ to generate this file without the comments in this block.
   , "safe-coerce"
   , "simple-json"
   , "tuples"
+  , "typelevel-peano"
   , "typelevel-prelude"
   , "unsafe-coerce"
+  , "variant"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]

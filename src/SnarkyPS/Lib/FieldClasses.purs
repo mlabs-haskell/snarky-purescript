@@ -18,7 +18,7 @@ class FieldLike :: Type -> Constraint
 class (ZkEq t, ZkOrd t) <= FieldLike t  where
   toField :: t -> Field
   fromField :: Field -> t -- partial
-  checkField :: t -> Context Void
+  checkField :: t -> Assertion
 
 instance FieldLike Field where
   toField = identity
@@ -47,7 +47,7 @@ instance CoerceBool Bool where
 class ZkEq :: Type -> Constraint
 class ZkEq t where
   zkEq :: t ->  t ->  Bool
-  zkAssertEq :: String -> t -> t -> Context Void
+  zkAssertEq :: String -> t -> t -> Assertion
 
 infix 4 zkEq as #==
 
@@ -63,13 +63,13 @@ instance ZkEq Bool where
 class ZkOrd :: Type -> Constraint
 class ZkEq t <= ZkOrd t where
   zkLT :: t -> t ->  Bool
-  assertLT :: String -> t -> t -> Context Void
+  assertLT :: String -> t -> t -> Assertion
   zkLTE :: t -> t ->  Bool
-  assertLTE :: String -> t -> t -> Context Void
+  assertLTE :: String -> t -> t -> Assertion
   zkGT  :: t -> t -> Bool
-  assertGT :: String -> t -> t -> Context Void
+  assertGT :: String -> t -> t -> Assertion
   zkGTE :: t -> t -> Bool
-  assertGTE :: String -> t -> t -> Context Void
+  assertGTE :: String -> t -> t -> Assertion
 
 infixl 4 zkLT as #<
 infixl 4 zkLTE as #<=
