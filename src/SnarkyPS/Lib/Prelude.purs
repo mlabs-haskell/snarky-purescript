@@ -20,10 +20,6 @@ module SnarkyPS.Lib.Prelude (
   , class ZkStruct
   , zkStruct
 
-  -- Unit
-  , ZkUnit
-  , zkUnit
-
   -- Maybe
   , MaybeR
   , ZkMaybe
@@ -74,17 +70,11 @@ import SnarkyPS.Lib.CircuitValue
 import SnarkyPS.Lib.CircuitValue.Data
 
 
-foreign import data ZkUnit :: Type
 
 assertEq :: forall a. ZkEq a => a -> a -> Assertion
 assertEq = zkAssertEq ""
 
-zkUnit :: ZkUnit
-zkUnit = unsafeCoerce $ field 1 -- somewhat arbitrary, doesn't matter what it is
 
--- internal
-unitField :: ZkUnit -> Field
-unitField = unsafeCoerce
 
 {- "Simplified" classes for converting Variants->Enums & Records->Structs
 
@@ -114,28 +104,6 @@ instance ZkData Record Struct r1 r2 => ZkStruct r1 r2 where
 class IsStruct :: Row Type -> Constraint
 class ZkStruct r1 r1 <=  IsStruct r1
 instance ZkStruct r1 r1 => IsStruct r1
-
-{- An in-circuit unit type -}
-instance ZkEq ZkUnit where
-  zkEq u1 u2 = (unitField u1 #== one) && (unitField u2 #== one)
-    where
-      one = field 1
-  zkAssertEq msg u1 u2 = assertTrue msg (u1 #== u2)
-
-instance FieldLike ZkUnit where
-  toField = unitField
-  fromField _ = zkUnit -- idk if this is the best approach here, TODO: think about this later
-  checkField u = assertTrue "invalid unit rep" (field 1 #== unitField u)
-
-instance ZkOrd ZkUnit where
-  zkLT _ _ = ff
-  assertLT msg _ _ = assertTrue msg ff
-  zkLTE _ _ = tt
-  assertLTE msg _ _ = assertTrue msg tt
-  zkGT _ _ = ff
-  assertGT msg _ _ = assertTrue msg ff
-  zkGTE _ _ = tt
-  assertGTE msg _ _ = assertTrue msg tt
 
 type MaybeR a = (just :: a, nothing :: ZkUnit)
 

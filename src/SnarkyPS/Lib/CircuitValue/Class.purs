@@ -194,6 +194,22 @@ else instance (
   check = checkEL (Proxy :: Proxy list)
 
   fromFields _ = fromFieldsEL (Proxy :: Proxy list) (Proxy :: Proxy row)
+else instance (
+    CircuitValue (Variant row)
+  ) => CircuitValue (Enum row) where
+  toFields _ = arrToFields <<< forgetEnum
+  sizeInFields _ = sizeInFields (Proxy :: Proxy (Variant row))
+  check _ = assertTrue "check enum CV" (bool true)
+  -- NOTE TODO FIXME: UNSAFE AS HELL
+  fromFields _ = Just <<< Enum <<< fieldsToArr
+else instance (
+    CircuitValue (Record row)
+  ) => CircuitValue (Struct row) where
+  toFields _ = arrToFields <<< forgetStruct
+  sizeInFields _ = sizeInFields (Proxy :: Proxy (Record row))
+  check _ = assertTrue "check struct CV" (bool true)
+  -- NOTE TODO FIXME: UNSAFE AS HELL
+  fromFields _ = Just <<< Struct <<< fieldsToArr
 -- Bare Fieldlike instance
 else instance FieldLike t => CircuitValue t where
   toFields _ t = arrToFields [toField t]
@@ -329,6 +345,33 @@ else instance (
         proxyT = Proxy :: Proxy t
         sizeT = sizeToInt $ sizeInFields proxyT
         ix' = BI.fromInt (reflectNat (Proxy :: Proxy ix))
+
+
+{-
+    Core Data Abstractions & Helpers
+-}
+
+-- Don't export the constructors!
+
+-- Record abstraction for zk circuits
+newtype Struct :: Row Type -> Type
+newtype Struct row = Struct (Array Field)
+
+instance Show (Struct r) where
+  show (Struct r) = "Struct " <> show r
+
+-- Variant abstraction for zk circuits
+newtype Enum :: Row Type -> Type
+newtype Enum row = Enum (Array Field)
+
+instance Show (Enum r) where
+  show (Enum r) = "Enum " <> show r
+
+forgetStruct :: forall (row :: Row Type). Struct row -> Array Field
+forgetStruct (Struct inner) = inner
+
+forgetEnum :: forall (row :: Row Type). Enum row -> Array Field
+forgetEnum (Enum inner) = inner
 
 
 {- Misc helpers. Don't expose these in the Prelude -}

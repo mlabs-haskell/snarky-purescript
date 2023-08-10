@@ -1,6 +1,8 @@
 module SnarkyPS.Lib.FieldClasses where
 
-import Prelude (identity, (<<<))
+import Prelude (identity, (<<<), ($))
+import Data.HeytingAlgebra
+import Unsafe.Coerce
 
 import SnarkyPS.Lib.Field
 import SnarkyPS.Lib.Bool
@@ -8,6 +10,7 @@ import SnarkyPS.Lib.Context
 import SnarkyPS.Lib.Hash
 
 import Unsafe.Coerce
+
 {- Class of FieldLike types. The keystone of this whole embedding.
 
    This class should *not* be directly exposed to users. We need the `fromField` method
@@ -123,3 +126,35 @@ instance ZkOrd Bool where
   assertGT msg b1 b2 = assertGtField msg (toField b1) (toField b2)
   zkGTE b1 b2 = toField b1 #>= toField b2
   assertGTE msg b1 b2 = assertGteField msg (toField b1) (toField b2)
+
+{- An in-circuit unit type -}
+
+foreign import data ZkUnit :: Type
+
+zkUnit :: ZkUnit
+zkUnit = unsafeCoerce $ field 1 -- somewhat arbitrary, doesn't matter what it is
+
+-- internal
+unitField :: ZkUnit -> Field
+unitField = unsafeCoerce
+
+instance ZkEq ZkUnit where
+  zkEq u1 u2 = (unitField u1 #== one) && (unitField u2 #== one)
+    where
+      one = field 1
+  zkAssertEq msg u1 u2 = assertTrue msg (u1 #== u2)
+
+instance FieldLike ZkUnit where
+  toField = unitField
+  fromField _ = zkUnit -- idk if this is the best approach here, TODO: think about this later
+  checkField u = assertTrue "invalid unit rep" (field 1 #== unitField u)
+
+instance ZkOrd ZkUnit where
+  zkLT _ _ = ff
+  assertLT msg _ _ = assertTrue msg ff
+  zkLTE _ _ = tt
+  assertLTE msg _ _ = assertTrue msg tt
+  zkGT _ _ = ff
+  assertGT msg _ _ = assertTrue msg ff
+  zkGTE _ _ = tt
+  assertGTE msg _ _ = assertTrue msg tt

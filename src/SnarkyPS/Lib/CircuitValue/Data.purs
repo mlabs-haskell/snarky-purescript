@@ -3,11 +3,7 @@
 -}
 
 module SnarkyPS.Lib.CircuitValue.Data (
-    Struct
-  , forgetStruct
-  , Enum
-  , forgetEnum
-  , class ZkData
+    class ZkData
   , zkMorph
   , class GetField
   , getField
@@ -61,34 +57,9 @@ import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.Bool
 import SnarkyPS.Lib.FieldClasses
 import SnarkyPS.Lib.CircuitValue.Class
-import SnarkyPS.Lib.CircuitValue.Class (class CircuitValue, sizeInFields, toFields, check, fromFields) as EXPORT
+import SnarkyPS.Lib.CircuitValue.Class (class CircuitValue, sizeInFields, toFields, check,  Struct, Enum, forgetStruct, forgetEnum) as EXPORT
 
 
-{-
-    Core Data Abstractions & Helpers
--}
-
--- Don't export the constructors!
-
--- Record abstraction for zk circuits
-newtype Struct :: Row Type -> Type
-newtype Struct row = Struct (Array Field)
-
-instance Show (Struct r) where
-  show (Struct r) = "Struct " <> show r
-
--- Variant abstraction for zk circuits
-newtype Enum :: Row Type -> Type
-newtype Enum row = Enum (Array Field)
-
-instance Show (Enum r) where
-  show (Enum r) = "Enum " <> show r
-
-forgetStruct :: forall (row :: Row Type). Struct row -> Array Field
-forgetStruct (Struct inner) = inner
-
-forgetEnum :: forall (row :: Row Type). Enum row -> Array Field
-forgetEnum (Enum inner) = inner
 
 {-
     Machinery for transforming Records/Variants into the Core Data Abstractions (Structs/Enums)
@@ -158,7 +129,7 @@ instance ZkData Struct Struct r r where
 {- TODO: Figure out why we need this! I really don't understand why ZkData isn't sufficient in every case :-( -}
 class ZkFromData :: (Row Type -> Type) -> (Row Type -> Type) -> Row Type  -> Row Type -> Constraint
 class ZkFromData f g ps zk | ps -> zk, g -> f
-instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, CircuitValue (Record psR)) => ZkFromData Record Struct psR zkR
+instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, CircuitValue (Record psR)) => ZkFromData Record Struct psR zk
 instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL,  CircuitValue (Variant psR)) => ZkFromData Variant Enum psR zkR
 
 
@@ -188,10 +159,10 @@ class Sized ::  Type -> Constraint
 class Sized t where
   sizeInFields_ :: Proxy t -> SizeInFields
 
-instance (ZkData Record Struct zkRow row, CircuitValue (Record row)) => Sized (Struct zkRow) where
-  sizeInFields_ _ = sizeInFields (Proxy :: Proxy (Record row))
-else instance (ZkData Variant Enum zkRow row, CircuitValue (Variant row)) => Sized (Enum zkRow) where
-  sizeInFields_ _ = sizeInFields (Proxy :: Proxy (Variant row))
+instance (SizedList zkList zkRow, RowToList zkRow zkList) => Sized (Struct zkRow) where
+  sizeInFields_ _ = sizeL (Proxy :: Proxy zkList) (Proxy :: Proxy zkRow)
+else instance (Sized (Variant zkRow)) => Sized (Enum zkRow) where
+  sizeInFields_ _ = sizeInFields_ (Proxy :: Proxy (Variant zkRow))
 else instance CircuitValue t => Sized t where
   sizeInFields_ proxy = sizeInFields proxy
 

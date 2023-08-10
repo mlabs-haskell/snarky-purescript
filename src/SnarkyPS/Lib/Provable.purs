@@ -19,6 +19,7 @@ import SnarkyPS.Lib.Field
 import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.FieldClasses
 import SnarkyPS.Lib.Bool
+import SnarkyPS.Lib.CircuitValue.Class
 import SnarkyPS.Lib.CircuitValue
 import SnarkyPS.Lib.Circuit
 

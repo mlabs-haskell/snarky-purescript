@@ -86,7 +86,7 @@ gameCircuit = mkCircuit runGame
 
           runMove :: ZkTuple U64 U64 -> ZkMaybe Move -> ZkTuple U64 U64
           runMove start mabMove = caseOn start mabMove {
-              nothing: [zkUnit ==> start]
+              nothing: zkUnit ==> start
             , just: {
                 up: zkUnit ==> second minusOne start
               , down: zkUnit ==> second plusOne start
@@ -165,5 +165,9 @@ testProof = prove testCirc {privB: bool false, privU: u64 10} {pubB: bool false,
 
 main :: Effect Unit
 main = launchAff_  do
-  proof <- testEnumProof
+  let board = {startPos: {fst: u64 2, snd: u64 2}, goal: {fst: u64 2, snd: u64 2}}
+      nullMove :: V.Variant (MaybeR Move)
+      nullMove = inj @"nothing" zkUnit
+      moves = {move1: nullMove, move2: nullMove, move3: nullMove, move4: nullMove}
+  proof <- prove gameCircuit board moves
   liftEffect $ debug proof
