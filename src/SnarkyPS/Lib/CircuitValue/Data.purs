@@ -36,6 +36,7 @@ import Data.Maybe
 import Effect
 import Record
 import Prim.Row as PR
+import Record as Rec
 import Data.Array ((:))
 import Data.Bifunctor
 import Unsafe.Coerce
@@ -136,11 +137,7 @@ instance (ZkDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, Circu
   zkMorph = Struct <<< fieldsToArr <<< toFields (Proxy :: Proxy (Record psR))
 instance (ZkDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL,  CircuitValue (Variant psR)) => ZkData Variant Enum psR zkR  where
   zkMorph = Enum <<< fieldsToArr <<< toFields (Proxy :: Proxy (Variant psR))
-{-
-class ZkFromData :: Type -> Type -> Constraint
-class ZkData ps zk <= ZkFromData zk ps | zk -> ps
-instance ZkData ps zk => ZkFromData zk ps
--}
+
 {-
      Record  Utilities
 -}
@@ -213,8 +210,6 @@ getIndex = Tuple l r
 {- Need this to avoid making Struct and Enum CircuitValues. They could be,
    but then we'd have to shove EVERYTHING into Class.purs.
 
-   This shouldn't be exported, it'll just confuse users.
-
    Super unsafe! Only for internal use!
 -}
 
@@ -241,7 +236,7 @@ instance ( UnsafeFromFields t
          , Locate list label
          , PR.Cons label t rowRest row -- Note: Need this for the compiler to infer the type of `t` (tho you'd think the fundep in GetField would suffice?)
          ) => GetField label t list row where
-  getField label list row= unsafeFromFields (Proxy :: Proxy t) <<< slice l r <<< forgetStruct
+  getField label list row = unsafeFromFields (Proxy :: Proxy t) <<< slice l r <<< forgetStruct
     where
       Tuple l r = getIndex @label @list
 
@@ -252,3 +247,4 @@ get :: forall @label t row list
     => Struct row
     -> t
 get = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row)
+

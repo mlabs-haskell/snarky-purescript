@@ -21,7 +21,7 @@ import Unsafe.Coerce
 import Safe.Coerce
 import Record.Unsafe
 import Data.Tuple
-import Data.Array (null, uncons, length, take, drop, replicate)
+import Data.Array (null, uncons, length, take, drop, replicate, (!!), reverse)
 import Simple.JSON
 import Data.Variant
 import Type.Data.Peano.Nat
@@ -237,7 +237,6 @@ instance ( IsNat n
 {-
      Enums
 -}
-
 class CircuitValueEL :: RowList Type -> Row Type -> Constraint
 class CircuitValueEL list row | list -> row  where
   toFieldsEL :: Proxy list -> Variant row -> Fields
@@ -249,7 +248,6 @@ class CircuitValueEL list row | list -> row  where
   checkEL :: Proxy list -> Variant row -> Assertion
 
   fromFieldsEL :: Proxy list -> Proxy row -> Fields -> Maybe (Variant row)
-
 {- I'll forget this if I don't write it down
 
    The encoding we use for Variants is:

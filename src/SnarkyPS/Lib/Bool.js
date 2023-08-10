@@ -50,10 +50,8 @@ export function assertEqBool(msg) {
 // String -> Bool -> Bool
 export function assertTrue(msg)  {
   return function(b) {
-    const f1 = b.assertTrue;
-    const f2 = f1.bind(b,msg);
-    return f2();
-  }
+    return B.assertEqual(b,true)
+  };
 };
 
 
@@ -67,9 +65,7 @@ export function assertFalse(msg) {
 
 export function equalsBool(b1) {
   return function(b2) {
-    const f1 = b1.equals;
-    const f2 = f1.bind(b1,b2);
-    return f2();
+    return B.equal(b1,b2);
   };
 };
 

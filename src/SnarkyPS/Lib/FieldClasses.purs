@@ -5,7 +5,9 @@ import Prelude (identity, (<<<))
 import SnarkyPS.Lib.Field
 import SnarkyPS.Lib.Bool
 import SnarkyPS.Lib.Context
+import SnarkyPS.Lib.Hash
 
+import Unsafe.Coerce
 {- Class of FieldLike types. The keystone of this whole embedding.
 
    This class should *not* be directly exposed to users. We need the `fromField` method
@@ -13,6 +15,12 @@ import SnarkyPS.Lib.Context
    reason for a user to need such a function, which looks like it can be used to escape the
    snarky context.
 -}
+
+hashToField :: Hash -> Field
+hashToField = unsafeCoerce
+
+fieldToHash :: Field -> Hash
+fieldToHash = unsafeCoerce
 
 class FieldLike :: Type -> Constraint
 class (ZkEq t, ZkOrd t) <= FieldLike t  where
@@ -29,6 +37,12 @@ instance FieldLike Bool where
   toField = toFieldBool
   fromField = fromFieldBool -- unsafe?
   checkField = checkBool
+
+instance FieldLike Hash where
+  toField = hashToField
+  fromField = fieldToHash
+  checkField h = checkField (toField h)
+
 
 fieldLikeToInput :: forall (t :: Type). FieldLike t => t -> HashInput
 fieldLikeToInput = toInputField <<< toField
@@ -59,6 +73,10 @@ instance ZkEq Bool where
   zkEq = equalsBool
   zkAssertEq = assertEqBool
 
+instance ZkEq Hash where
+  zkEq h1 h2 = zkEq (hashToField h1) (hashToField h2)
+  zkAssertEq msg h1 h2 = zkAssertEq msg (hashToField h1) (hashToField h2)
+
 {- Ord for Circuit Values -}
 class ZkOrd :: Type -> Constraint
 class ZkEq t <= ZkOrd t where
@@ -85,6 +103,16 @@ instance ZkOrd Field where
   assertGT = assertGtField
   zkGTE = gteField
   assertGTE = assertGteField
+
+instance ZkOrd Hash where
+  zkLT h1 h2 = ltField (hashToField h1) (hashToField h2)
+  assertLT msg h1 h2 = assertLT msg (hashToField h1) (hashToField h2)
+  zkLTE h1 h2 = zkLTE (hashToField h1) (hashToField h2)
+  assertLTE msg h1 h2 = assertLTE msg (hashToField h1) (hashToField h2)
+  zkGT h1 h2 = zkGT (hashToField h1) (hashToField h2)
+  assertGT msg h1 h2 = assertGT msg (hashToField h1) (hashToField h2)
+  zkGTE  h1 h2 = zkGTE (hashToField h1) (hashToField h2)
+  assertGTE msg h1 h2 = assertGTE msg (hashToField h1) (hashToField h2)
 
 instance ZkOrd Bool where
   zkLT b1 b2 = toField b1 #< toField b2
