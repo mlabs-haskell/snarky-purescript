@@ -1,5 +1,6 @@
 import { Field } from "../../snarkydist/node/lib/field.js";
 import { Bool } from "../../snarkydist/node/lib/bool.js";
+import { Bool as B } from "../../snarkydist/node/lib/bool.js";
 
 export function newField(x) {
   const f = Field.from(x);
@@ -201,6 +202,29 @@ export function toBoolean(b) {
 export function fromBoolean(b) {
   return new Bool(b);
 };
+
+// Bool -> Bool
+export function notBool(b) {
+  return B.b.not();
+};
+
+// Bool -> Bool -> Bool
+export function andBool(b1) {
+  return function(b2) {
+    const f1 = b1.and;
+    const f2 = f1.bind(b1,b2);
+    return f2();
+  };
+};
+
+export function orBool(b1) {
+  return function(b2) {
+    const f1 = b1.or;
+    const f2 = f1.bind(b1,b2);
+    return f2();
+  };
+};
+
 
 // Misc functions for working with opaques
 export function sizeToInt(size) {

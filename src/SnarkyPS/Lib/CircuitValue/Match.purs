@@ -51,38 +51,41 @@ import SnarkyPS.Lib.Hash
 emptyHash :: Hash
 emptyHash = fieldToHash (field 0)
 
+-- It's awkward to make Structs and Enums CircuitValue instances, here we need the `toFields` part of CV
+class ToFields (t :: Type) where
+  toFields_ :: t -> Array Field
+
+instance ToFields (Struct r) where
+  toFields_ = forgetStruct
+else instance ToFields (Enum r) where
+  toFields_ = forgetEnum
+else instance CircuitValue t => ToFields t where
+  toFields_ = unsafeCoerce <<< toFields (Proxy :: Proxy t)
+
+hashCV :: forall t. ToFields t => t -> Hash
+hashCV = hashFields <<< toFields_
+
 foreign import unsafeHead :: forall (t :: Type). Array t -> t
 
-foreign import unsafeTail :: forall (t :: Type). Array t -> Array t
-
-type  MayB a = (forall b. (a -> b) -> b -> b)
-
-just :: forall a. a -> MayB a
-just a =  \f _ -> f a
-
-nothing :: forall @a. MayB a
-nothing = \_ b -> b
-
-mayB :: forall a b. MayB a -> (a -> b) -> b -> b
-mayB m f b = m f b
-
-class MatchRL :: RowList Type -> Row Type -> RowList Type -> Row Type -> Type -> Constraint
-class MatchRL pList pRow zList zRow result | pList -> pRow, zList -> zRow  where
-  caseOn_ :: Proxy pList -> Proxy zList -> Record pRow -> Enum zRow -> result
+class MatchE :: RowList Type -> Row Type -> RowList Type -> Row Type -> Type -> Constraint
+class MatchE pList pRow zList zRow result | pList -> pRow, zList -> zRow  where
+  -- we need to pass in a default `result` value to make this work
+  caseOn_ :: result -> Proxy pList -> Proxy zList -> Record pRow -> Enum zRow -> result
 
 instance (
     IsSymbol l
-  , RowToList r (Cons l (Hash -> b) Nil)
+  , Matchable a b res
+  , RowToList r (Cons l b Nil)
   , RowToList r' (Cons l a Nil)
-  , PR.Cons l (Hash -> b) () r
+  , PR.Cons l b () r
   , PR.Cons l a () r'
-  ) => MatchRL (Cons l (Hash -> b) Nil) r (Cons l a Nil) r' b where
-  caseOn_ pList zList pRec zEnum =
+  ) => MatchE (Cons l b Nil) r (Cons l a Nil) r' res where
+  caseOn_ res pList zList pRec zEnum =
     let label :: Proxy l
         label = Proxy
 
-        f :: (Hash -> b)
-        f = Rec.get label pRec
+        matcher :: b
+        matcher = Rec.get label pRec
 
         aFields = drop 1 $ forgetEnum zEnum
 
@@ -90,29 +93,30 @@ instance (
 
         aHash = hashFields aFields
     in zkIfI_ (aIndex #== field 1)  -- We know the index here has to be 1 b/c we're out of Variant to traverse
-         (f aHash)
-         (f emptyHash)
+         (runMatch res aFields matcher )
+         (res)
 else instance (
     IsSymbol l
-  , RowToList pRowFull (Cons l (Hash -> b)  pListRest)
+  , Matchable a b res
+  , RowToList pRowFull (Cons l b  pListRest)
   , RowToList zRowFull (Cons l a zListRest)
-  , CircuitValue b
   , PR.Lacks l pRowRest
-  , PR.Cons l (Hash -> b) pRowRest pRowFull
+  , PR.Cons l b pRowRest pRowFull
   , PR.Cons l a zRowRest zRowFull
-  , MatchRL pListRest pRowRest zListRest zRowRest b
+  , MatchE pListRest pRowRest zListRest zRowRest res
   , Index l (Cons l a zListRest) zRowFull ix
   , IsNat ix
-  ) => MatchRL (Cons l (Hash -> b) pListRest) pRowFull (Cons l a zListRest) zRowFull b where
-  caseOn_ pList zList pRec zEnum = zkIfI_ (i #== ix)
-     (f <<< hashFields $ valFields)
-     (g (unsafeCoerce zEnum :: Enum zRowRest))
+  ) => MatchE (Cons l b pListRest) pRowFull (Cons l a zListRest) zRowFull res where
+  caseOn_ res pList zList pRec zEnum =
+    zkIfI_ (i #== ix)
+      (runMatch res valFields b)
+      (g (unsafeCoerce zEnum :: Enum zRowRest))
    where
-     label :: Proxy l
-     label = Proxy
+     l :: Proxy l
+     l = Proxy
 
-     f :: (Hash -> b)
-     f = Rec.get label pRec
+     b :: b
+     b = Rec.get l pRec
 
      fields = forgetEnum zEnum
  
@@ -121,53 +125,69 @@ else instance (
 
      valFields = drop 1 fields
 
-     g = caseOn_ pListRest zListRest (Rec.delete l pRec)
+     g = caseOn_ res pListRest zListRest (Rec.delete l pRec)
 
      pListRest = Proxy :: Proxy pListRest
      zListRest = Proxy :: Proxy zListRest
 
-     noField = field (-1)
-     l :: Proxy l
-     l = Proxy
+caseOn :: forall t m r. Matchable t m r => ToFields t => r -> t -> m -> r
+caseOn res t m = runMatch res (unsafeCoerce (toFields_ t) :: Array Field)  m
 
-
-
-caseOn :: forall (pR :: Row Type) (zR :: Row Type) (pL :: RowList Type) (zL :: RowList Type) (r :: Type)
-       . RowToList pR pL
-       => RowToList zR zL
-       => MatchRL pL pR zL zR r
-       => Enum zR
-       -> Record pR
-       -> r
-caseOn e r = caseOn_ (Proxy :: Proxy pL) (Proxy :: Proxy zL) r e
-
-
-data Match t t' r = Match t (t' -> r)
+data Match t r = Match t r
 
 class Matchable :: Type -> Type -> Type -> Constraint
-class Matchable (t :: Type) (m :: Type) (res :: Type) where
-  runMatch :: res -> t -> m -> res
+class Matchable (t :: Type) (m :: Type) (res :: Type) | m -> t where
+  runMatch :: res -> Array Field  -> m -> res
 
-instance Matchable Bool (Array (Match Boolean Bool r)) r where
-  runMatch res b arr = case uncons arr of
-    Nothing -> res
-    Just {head: Match b' f, tail: t} ->
-      zkIfI_ (b #== bool b')
-        (f b)
-        (runMatch res b t)
+instance (
+      MatchE pList pRow zList zRow result
+    , RowToList pRow pList
+    , RowToList zRow zList
+    ) => Matchable (Enum zRow) (Record pRow) result where
+  runMatch res e r = caseOn_
+                       res
+                       (Proxy :: Proxy pList)
+                       (Proxy :: Proxy zList)
+                       r
+                       (unsafeCoerce e :: Enum zRow)
 
-instance Matchable U64 (Array (Match BigInt U64 r)) r where
-  runMatch res u arr = case uncons arr of
-    Nothing -> res
-    Just {head: Match u' f, tail: t} ->
-      zkIfI_ (u #== u')
-        (f u)
-        (runMatch res u t)
+instance (
+      ZkFromData Record Struct r zR
+    , ToFields (Record r)
+    ) => Matchable (Struct zR) (Array (Match (Record r) res)) res where
+  runMatch def rFields arr = case uncons arr of
+    Nothing -> def
+    Just {head: Match r' res, tail: t} ->
+      zkIfI_ (hashFields rFields #== hashCV r')
+        (res)
+        (runMatch def rFields t)
 
-instance Matchable Field (Array (Match Field Field r)) r where
-  runMatch res l arr = case uncons arr of
+instance Matchable Bool (Array (Match Boolean r)) r where
+  runMatch res bFields arr = case uncons arr of
     Nothing -> res
-    Just {head: Match l' f, tail: t} ->
-      zkIfI_ (l #== l')
-        (f l)
-        (runMatch res l t)
+    Just {head: Match b' r, tail: t} ->
+      zkIfI_ (hashFields bFields  #== hashCV (bool b'))
+        (r)
+        (runMatch res bFields t)
+
+instance Matchable U64 (Array (Match Int r)) r where
+  runMatch res uFields arr = case uncons arr of
+    Nothing -> res
+    Just {head: Match u' r, tail: t} ->
+      zkIfI_ (hashFields uFields #== hashCV (u64 u'))
+        (r)
+        (runMatch res uFields t)
+
+instance Matchable Field (Array (Match Field r)) r where
+  runMatch res fFields arr = case uncons arr of
+    Nothing -> res
+    Just {head: Match l' r, tail: t} ->
+      zkIfI_ (hashFields fFields #== hashFields [l'])
+        (r)
+        (runMatch res fFields t)
+
+
+mkMatch :: forall t r. t -> r -> Match t r
+mkMatch t r = Match t r
+
+infixl 0 mkMatch as ==>

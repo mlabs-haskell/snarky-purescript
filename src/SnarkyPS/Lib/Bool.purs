@@ -19,12 +19,6 @@ foreign import toStringBool :: Bool -> String
 
 foreign import toFieldBool :: Bool -> Field
 
-foreign import notBool :: Bool -> Bool
-
-foreign import andBool :: Bool -> Bool -> Bool
-
-foreign import orBool :: Bool -> Bool -> Bool
-
 foreign import assertEqBool :: String -> Bool -> Bool -> Assertion
 
 foreign import assertTrue :: String -> Bool -> Assertion

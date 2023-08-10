@@ -11,32 +11,132 @@ import Data.Variant as V
 import Prim.Row as PR
 import Type.Data.Symbol
 
-import SnarkyPS.Lib.CircuitValue
-import SnarkyPS.Lib.Context
-import SnarkyPS.Lib.Bool
-import SnarkyPS.Lib.Int
-import SnarkyPS.Lib.Field
-import SnarkyPS.Lib.FieldClasses
-import SnarkyPS.Lib.Circuit
-import SnarkyPS.Lib.Provable
-import SnarkyPS.Lib.CircuitValue.Match
-import SnarkyPS.Lib.Hash
+import SnarkyPS.Lib.Prelude
+
+{- Stupid toy game example.
+
+  Game is a guessing game with a board:
+      1 2 3
+   1 | | | |
+     |-----|
+   2 | |x| |
+     |-----|
+   3 | | | |
+
+  First player submits a series of moves that move the x around, second player tries to guess the
+  location (also by a series of moves).
+
+  Written to illustrate features, not for elegance/performance/etc.
+-}
+
+type Coord = ZkTuple U64 U64
+
+-- need a type to represent the board
+type Board = Struct (startPos :: ZkTuple U64 U64, goal :: ZkTuple U64 U64)
+
+
+-- moves are processed in the order: Up -> Down -> Left -> Right (there are better ways to represent this, written like this to show off pattern matching)
+type Move
+  = Enum ( up :: ZkUnit
+         , down :: ZkUnit
+         , left :: ZkUnit
+         , right :: ZkUnit )
+
+type Moves = Struct ( move1 :: ZkMaybe Move
+                    , move2 :: ZkMaybe Move
+                    , move3 :: ZkMaybe Move
+                    , move4 :: ZkMaybe Move)
+
+gameCircuit :: Circuit Board Moves
+gameCircuit = mkCircuit runGame
+  where
+    runGame :: Board -> Moves -> Assertion
+    runGame board moves =
+      let startPos :: ZkTuple U64 U64
+          startPos = get @"startPos" board
+          startX   = fst startPos :: U64
+          startY   = snd startPos :: U64
+
+          goal     :: ZkTuple U64 U64
+          goal     = get @"goal" board
+          goalX    = fst goal :: U64
+          goalY    = snd goal :: U64
+
+          move1    = get @"move1" moves :: ZkMaybe Move
+          move2    = get @"move2" moves :: ZkMaybe Move
+          move3    = get @"move3" moves :: ZkMaybe Move
+          move4    = get @"move4" moves :: ZkMaybe Move
+
+          check :: U64 -> Bool
+          check x = (x #> (u64 0)) && (x #<= (u64 3))
+
+          okStart :: Assertion
+          okStart = assertTrue "bad start" $ (check startX) && (check startY)
+
+          okGoal :: Assertion
+          okGoal = assertTrue "bad goal" $ (check goalX) && (check goalY)
+
+          one :: U64
+          one = u64 1
+
+          plusOne :: U64 -> U64
+          plusOne = \x -> x + one
+          minusOne :: U64 -> U64
+          minusOne = \x -> x - one
+
+          runMove :: ZkTuple U64 U64 -> ZkMaybe Move -> ZkTuple U64 U64
+          runMove start mabMove = caseOn start mabMove {
+              nothing: [zkUnit ==> start]
+            , just: {
+                up: zkUnit ==> second minusOne start
+              , down: zkUnit ==> second plusOne start
+              , left: zkUnit ==> first minusOne start
+              , right: zkUnit ==> first plusOne start
+            }
+          }
+
+          validBoard :: Assertion
+          validBoard = assertMany [okStart, okGoal]
+
+          endPos :: ZkTuple U64 U64
+          endPos =
+            let moved1 = runMove startPos move1
+                moved2 = runMove moved1 move2
+                moved3 = runMove moved2 move3
+            in runMove moved3 move4
+
+          -- TODO: "generic eq" for structs and enums
+          playerWins :: Bool
+          playerWins =
+            let endX :: U64
+                endX = fst endPos
+
+                endY :: U64
+                endY = snd endPos
+            in (endX #== goalX) && (endY #== goalY)
+      in assertAndThen validBoard
+         $ assertTrue "player lost" playerWins
+
+
+
+
+
+
+
 
 type Priv = (privB :: Bool, privU :: U64)
 type Pub = (pubB :: Bool, pubU :: U64)
 
 type TestRow = (bewl :: Bool, ent :: U64)
 
-inL :: forall @sym a r1 r2. PR.Cons sym a r1 r2 => IsSymbol sym => a -> V.Variant r2
-inL = V.inj (Proxy :: Proxy sym)
-
 testEnumFunc :: Enum TestRow -> Struct TestRow -> Assertion
 testEnumFunc priv pub = assertTrue "enum" go
   where
     go :: Bool
-    go = caseOn priv {
-        bewl: \(hash :: Hash) -> hash #== hashFields (toFieldsBool $ bool false)
-      , ent: \(hash :: Hash) -> hash #== hashFields (toFieldsBool $ bool false)
+    go = caseOn (bool false) priv {
+        bewl: [ true ==> bool true
+              , false ==> bool false ]
+      , ent: [10 ==> bool true]
       }
 
 testEnumCirc :: Circuit (Enum TestRow) (Struct TestRow)
@@ -46,7 +146,7 @@ testEnumProof :: Aff (Proof (Enum TestRow) (Struct TestRow))
 testEnumProof = prove testEnumCirc priv pub
   where
     priv :: V.Variant TestRow
-    priv = inL @"bewl" $ bool true
+    priv = inj @"bewl" $ bool true
 
     pub = {bewl: bool true, ent: u64 5}
 

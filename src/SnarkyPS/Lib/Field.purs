@@ -2,15 +2,13 @@ module SnarkyPS.Lib.Field  where
 
 import Prelude hiding (Void)
 
-import Data.BigInt
+import Data.BigInt (BigInt)
 import Data.BigInt as BI
 import Type.Data.Symbol
 import Prim.Symbol
 import Type.Proxy
 import Data.Maybe
-import Data.Argonaut.Encode.Class
-import Data.Argonaut.Decode.Class
-
+import Data.HeytingAlgebra
 import SnarkyPS.Lib.Context
 
 foreign import data Field :: Type
@@ -134,12 +132,27 @@ foreign import checkField_ :: Field -> Assertion
 {-
   Bool Functions (for instances)
 
-  NOTE: Neither of  these should be directly exposed to the user
 -}
+
+foreign import notBool :: Bool -> Bool
+
+foreign import andBool :: Bool -> Bool -> Bool
+
+foreign import orBool :: Bool -> Bool -> Bool
 
 foreign import fromBoolean :: Boolean -> Bool
 
 foreign import toBoolean :: Bool -> Boolean
+
+{- Bool HeytingAlgebra Instance (so we can use && || etc directly -}
+
+instance HeytingAlgebra Bool where
+  ff = fromBoolean false
+  tt = fromBoolean true
+  implies a b = not a || b
+  conj = andBool
+  disj = orBool
+  not = notBool
 
 -- NOTE: These show instances are necessary for debugging, but should be removed eventually
 instance Show Field where
@@ -186,4 +199,3 @@ else instance DigitSym "7"
 else instance DigitSym "8"
 else instance DigitSym "9"
 else instance (DigitSym l, DigitSym r, IsSymbol o, Append l r o) => DigitSym o
-

@@ -12,6 +12,7 @@ module SnarkyPS.Lib.CircuitValue.Data (
   , class GetField
   , getField
   , get
+  , inj
   , class Sized
   , sizeInFields_
   , class SizedList
@@ -19,10 +20,12 @@ module SnarkyPS.Lib.CircuitValue.Data (
   , class Locate
   , loc
   , module EXPORT
-  , class UnsafeFromFields
-  , unsafeFromFields
+  , class FromFields
+  , fromFields_
   , class ZkFromDataRow
   , class ZkDataRow
+  , class ZkFromData
+  , class Gettable
   ) where
 
 import Prelude hiding (Void)
@@ -45,7 +48,8 @@ import Record.Unsafe
 import Data.Tuple
 import Data.Array (null, uncons, length, take, drop, length, replicate, slice)
 import Simple.JSON
-import Data.Variant
+import Data.Variant (Variant)
+import Data.Variant as V
 import Type.Data.Peano.Nat
 import Partial
 import Partial.Unsafe
@@ -116,7 +120,16 @@ else instance (
   , ZkDataRow listRest rowRest zkListRest zkRowRest
   ) => ZkDataRow (Cons label (Variant r) listRest) rowFull (Cons label (Enum r') zkListRest) zkRowFull
 else instance (
-    FieldLike t
+    ZkData f g ps zk
+  , PR.Cons label (f ps) rowRest rowFull
+  , PR.Cons label (g zk) zkRowRest zkRowFull
+  , RowToList rowFull (Cons label (f ps) listRest)
+  , RowToList zkRowFull (Cons label (g zk) zkListRest)
+  , IsSymbol label
+  , ZkDataRow listRest rowRest zkListRest zkRowRest
+  ) => ZkDataRow (Cons label (f ps) listRest) rowFull (Cons label (g zk) zkListRest) zkRowFull
+else instance (
+    Sized t
   , PR.Cons label t rowRest rowFull
   , PR.Cons label t zkRowRest zkRowFull
   , RowToList rowFull (Cons label t listRest)
@@ -137,6 +150,17 @@ instance (ZkDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, Circu
   zkMorph = Struct <<< fieldsToArr <<< toFields (Proxy :: Proxy (Record psR))
 instance (ZkDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL,  CircuitValue (Variant psR)) => ZkData Variant Enum psR zkR  where
   zkMorph = Enum <<< fieldsToArr <<< toFields (Proxy :: Proxy (Variant psR))
+instance ZkData Enum Enum r r where
+  zkMorph = identity
+instance ZkData Struct Struct r r where
+  zkMorph = identity
+
+{- TODO: Figure out why we need this! I really don't understand why ZkData isn't sufficient in every case :-( -}
+class ZkFromData :: (Row Type -> Type) -> (Row Type -> Type) -> Row Type  -> Row Type -> Constraint
+class ZkFromData f g ps zk | ps -> zk, g -> f
+instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, CircuitValue (Record psR)) => ZkFromData Record Struct psR zkR
+instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL,  CircuitValue (Variant psR)) => ZkFromData Variant Enum psR zkR
+
 
 {-
      Record  Utilities
@@ -213,30 +237,36 @@ getIndex = Tuple l r
    Super unsafe! Only for internal use!
 -}
 
-class UnsafeFromFields t where
+class FromFields t where
   {-| DO NOT USE THIS -}
-  unsafeFromFields :: Proxy t -> Array Field -> t
+  fromFields_ :: Proxy t -> Array Field -> t
 
-instance UnsafeFromFields (Enum row) where
-  unsafeFromFields _ = Enum
-else instance UnsafeFromFields (Struct row) where
-  unsafeFromFields _ = Struct
-else instance CircuitValue t => UnsafeFromFields t where
-  unsafeFromFields proxy =  unsafePartial fromJust <<< fromFields proxy <<< arrToFields
+-- super unsafe instances for Struct/Enum
+instance FromFields (Enum row) where
+  fromFields_ _ = Enum
+else instance FromFields (Struct row) where
+  fromFields_ _ = Struct
+else instance CircuitValue t => FromFields t where
+  fromFields_ proxy = unsafePartial fromJust <<< fromFields proxy <<< arrToFields
+
+{- Simplified constraint for use in Prelude -}
+
+class (Sized a, FromFields a) <= Gettable a
+instance (Sized a, FromFields a) => Gettable a
 
 {- Solely to avoid constraint noise & reduce the need for type applications & proxies -}
 class GetField :: Symbol -> Type -> RowList Type -> Row Type  -> Constraint
 class GetField label t list row | list -> row, label row -> t where
   getField :: Proxy label -> Proxy list -> Proxy row -> Struct row -> t
 
-instance ( UnsafeFromFields t
+instance ( FromFields t
          , RowToList row list
          , SizedList list row
          , IsSymbol label
          , Locate list label
          , PR.Cons label t rowRest row -- Note: Need this for the compiler to infer the type of `t` (tho you'd think the fundep in GetField would suffice?)
          ) => GetField label t list row where
-  getField label list row = unsafeFromFields (Proxy :: Proxy t) <<< slice l r <<< forgetStruct
+  getField label list row = fromFields_ (Proxy :: Proxy t) <<< slice l r <<< forgetStruct
     where
       Tuple l r = getIndex @label @list
 
@@ -248,3 +278,6 @@ get :: forall @label t row list
     -> t
 get = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row)
 
+{- Create a Variant -}
+inj :: forall @sym a r1 r2. PR.Cons sym a r1 r2 => IsSymbol sym => a -> V.Variant r2
+inj = V.inj (Proxy :: Proxy sym)
