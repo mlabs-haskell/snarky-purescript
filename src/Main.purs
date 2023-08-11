@@ -22,8 +22,9 @@ import SnarkyPS.Lib.Prelude
      |-----|
    3 | | | |
 
-  First player submits a series of moves that move the x around, second player tries to guess the
-  location (also by a series of moves).
+  "Private" player picks a starting position and goal position on a 3x3 grid.
+
+  "Public" player tries to guess a series of 4 moves (can pass) to get from the start pos to the end pos.
 
   Written to illustrate features, not for elegance/performance/etc.
 -}
@@ -33,11 +34,6 @@ type Coords = Pair U64 U64
 -- need a type to represent the board
 type Board = {startPos :: Coords, goal :: Coords}
 
-testBoard :: Board
-testBoard = {startPos: {_1: u64 2, _2: u64 2}, goal: {_1: u64 2, _2: u64 2}}
-
-
--- moves are processed in the order: Up -> Down -> Left -> Right (there are better ways to represent this, written like this to show off pattern matching)
 type Move
   = Var ( up :: ZUnit
         , down :: ZUnit
@@ -56,16 +52,17 @@ gameCircuit = mkCircuit runGame
     runGame :: Zk Moves -> Zk Board -> Assertion
     runGame moves' board' =
       let
+          -- TODO: eliminate the need for these
           moves = coerceToZk moves'
           board = coerceToZk board'
 
           startPos = get @"startPos" board
-          startX   = fst startPos :: Zk U64
-          startY   = snd startPos ::Zk U64
+          startX   = fst startPos
+          startY   = snd startPos
 
           goal     = get @"goal" board
-          goalX    = fst goal :: Zk U64
-          goalY    = snd goal :: Zk U64
+          goalX    = fst goal
+          goalY    = snd goal
 
           move1    = get @"move1" moves
           move2    = get @"move2" moves
@@ -119,14 +116,22 @@ gameCircuit = mkCircuit runGame
                 endY :: Zk U64
                 endY = snd endPos
             in (endX #== goalX) && (endY #== goalY)
-      in assertTrue "player lost" playerWins
+      in assertAndThen validBoard
+         $ assertTrue "player lost" playerWins
+
+testBoard :: Board
+testBoard = {startPos: {_1: u64 2, _2: u64 2}, goal: {_1: u64 2, _2: u64 1}}
+
+testMoves :: Moves
+testMoves = {move1: inj @"some"  up , move2: nullMove, move3: nullMove, move4: nullMove}
+  where
+    nullMove :: Option (Zk Move)
+    nullMove = inj @"none" zUnit
+    up :: Zk Move
+    up = toZk $ inj @"up" zUnit
 
 
 main :: Effect Unit
 main =  launchAff_  do
-  let board = testBoard
-      nullMove :: Option (Zk Move)
-      nullMove = inj @"none" zUnit
-      moves = {move1: nullMove, move2: nullMove, move3: nullMove, move4: nullMove}
-  proof <- prove gameCircuit  moves board
+  proof <- prove gameCircuit testMoves testBoard
   liftEffect $ debug proof
