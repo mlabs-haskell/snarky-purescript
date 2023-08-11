@@ -7,7 +7,6 @@ import Effect.Class
 import Effect.Aff
 import Effect.Console (log)
 import Type.Proxy
-import Data.Variant as V
 import Prim.Row as PR
 import Type.Data.Symbol
 
@@ -29,46 +28,52 @@ import SnarkyPS.Lib.Prelude
   Written to illustrate features, not for elegance/performance/etc.
 -}
 
-type Coord = ZkTuple U64 U64
+type Coords = Pair U64 U64
 
 -- need a type to represent the board
-type Board = Struct (startPos :: ZkTuple U64 U64, goal :: ZkTuple U64 U64)
+type Board = {startPos :: Coords, goal :: Coords}
+
+testBoard :: Board
+testBoard = {startPos: {_1: u64 2, _2: u64 2}, goal: {_1: u64 2, _2: u64 2}}
 
 
 -- moves are processed in the order: Up -> Down -> Left -> Right (there are better ways to represent this, written like this to show off pattern matching)
 type Move
-  = Enum ( up :: ZkUnit
-         , down :: ZkUnit
-         , left :: ZkUnit
-         , right :: ZkUnit )
+  = Var ( up :: ZUnit
+        , down :: ZUnit
+        , left :: ZUnit
+        , right :: ZUnit )
 
-type Moves = Struct ( move1 :: ZkMaybe Move
-                    , move2 :: ZkMaybe Move
-                    , move3 :: ZkMaybe Move
-                    , move4 :: ZkMaybe Move)
+type Moves = { move1 :: Option (Zk Move)
+             , move2 :: Option (Zk Move)
+             , move3 :: Option (Zk Move)
+             , move4 :: Option (Zk Move) }
 
-gameCircuit :: Circuit Board Moves
+-- Note to self, make a TermCont monad for Zk
+gameCircuit :: Circuit Moves Board
 gameCircuit = mkCircuit runGame
   where
-    runGame :: Board -> Moves -> Assertion
-    runGame board moves =
-      let startPos :: ZkTuple U64 U64
+    runGame :: Zk Moves -> Zk Board -> Assertion
+    runGame moves' board' =
+      let
+          moves = coerceToZk moves'
+          board = coerceToZk board'
+
           startPos = get @"startPos" board
-          startX   = fst startPos :: U64
-          startY   = snd startPos :: U64
+          startX   = fst startPos :: Zk U64
+          startY   = snd startPos ::Zk U64
 
-          goal     :: ZkTuple U64 U64
           goal     = get @"goal" board
-          goalX    = fst goal :: U64
-          goalY    = snd goal :: U64
+          goalX    = fst goal :: Zk U64
+          goalY    = snd goal :: Zk U64
 
-          move1    = get @"move1" moves :: ZkMaybe Move
-          move2    = get @"move2" moves :: ZkMaybe Move
-          move3    = get @"move3" moves :: ZkMaybe Move
-          move4    = get @"move4" moves :: ZkMaybe Move
+          move1    = get @"move1" moves
+          move2    = get @"move2" moves
+          move3    = get @"move3" moves
+          move4    = get @"move4" moves
 
-          check :: U64 -> Bool
-          check x = (x #> (u64 0)) && (x #<= (u64 3))
+          check :: Zk U64 -> Bool
+          check zkU64 = unZk zkU64 $ \x -> (x #> (u64 0)) && (x #<= (u64 3))
 
           okStart :: Assertion
           okStart = assertTrue "bad start" $ (check startX) && (check startY)
@@ -84,21 +89,21 @@ gameCircuit = mkCircuit runGame
           minusOne :: U64 -> U64
           minusOne = \x -> x - one
 
-          runMove :: ZkTuple U64 U64 -> ZkMaybe Move -> ZkTuple U64 U64
+          runMove :: Zk Coords -> ZOption Move -> Zk Coords
           runMove start mabMove = caseOn start mabMove {
-              nothing: zkUnit ==> start
-            , just: {
-                up: zkUnit ==> second minusOne start
-              , down: zkUnit ==> second plusOne start
-              , left: zkUnit ==> first minusOne start
-              , right: zkUnit ==> first plusOne start
+              none: zUnit ==> start
+            , some: {
+                up: zUnit ==>  (second minusOne start)
+              , down: zUnit ==>  (second plusOne start)
+              , left: zUnit ==>  (first minusOne start)
+              , right: zUnit ==> (first plusOne start)
             }
           }
 
           validBoard :: Assertion
           validBoard = assertMany [okStart, okGoal]
 
-          endPos :: ZkTuple U64 U64
+          endPos :: Zk Coords
           endPos =
             let moved1 = runMove startPos move1
                 moved2 = runMove moved1 move2
@@ -108,66 +113,20 @@ gameCircuit = mkCircuit runGame
           -- TODO: "generic eq" for structs and enums
           playerWins :: Bool
           playerWins =
-            let endX :: U64
+            let endX :: Zk U64
                 endX = fst endPos
 
-                endY :: U64
+                endY :: Zk U64
                 endY = snd endPos
             in (endX #== goalX) && (endY #== goalY)
-      in assertAndThen validBoard
-         $ assertTrue "player lost" playerWins
+      in assertTrue "player lost" playerWins
 
-
-
-
-
-
-
-
-type Priv = (privB :: Bool, privU :: U64)
-type Pub = (pubB :: Bool, pubU :: U64)
-
-type TestRow = (bewl :: Bool, ent :: U64)
-
-testEnumFunc :: Enum TestRow -> Struct TestRow -> Assertion
-testEnumFunc priv pub = assertTrue "enum" go
-  where
-    go :: Bool
-    go = caseOn (bool false) priv {
-        bewl: [ true ==> bool true
-              , false ==> bool false ]
-      , ent: [10 ==> bool true]
-      }
-
-testEnumCirc :: Circuit (Enum TestRow) (Struct TestRow)
-testEnumCirc = mkCircuit testEnumFunc
-
-testEnumProof :: Aff (Proof (Enum TestRow) (Struct TestRow))
-testEnumProof = prove testEnumCirc priv pub
-  where
-    priv :: V.Variant TestRow
-    priv = inj @"bewl" $ bool true
-
-    pub = {bewl: bool true, ent: u64 5}
-
-
-testFunc ::  Struct Priv -> Struct Pub -> Assertion
-testFunc = \b1 b2 ->
-  let priB = get @"privB" b1
-      pubB = get @"pubB"  b2
-  in assertTrue "Test 1" (priB #== pubB)
-
-testCirc :: Circuit (Struct Priv) (Struct Pub)
-testCirc = mkCircuit testFunc
-
-testProof :: Aff (Proof (Struct Priv) (Struct Pub))
-testProof = prove testCirc {privB: bool false, privU: u64 10} {pubB: bool false, pubU: u64 5}
 
 main :: Effect Unit
-main = launchAff_  do
-  let board = {startPos: {fst: u64 2, snd: u64 2}, goal: {fst: u64 2, snd: u64 2}}
-      nullMove :: V.Variant (MaybeR Move)
-      nullMove = inj @"nothing" zkUnit
+main =  launchAff_  do
+  let board = testBoard
+      nullMove :: Option (Zk Move)
+      nullMove = inj @"none" zUnit
       moves = {move1: nullMove, move2: nullMove, move3: nullMove, move4: nullMove}
-  proof <- prove gameCircuit board moves
+  proof <- prove gameCircuit  moves board
   liftEffect $ debug proof

@@ -16,7 +16,10 @@ export function toBigIntU64(i) {
 };
 
 export function toFieldU64(i) {
-  return i.value;
+  const i64 = Int64.fromUnsigned(i);
+  const f1  = i64.toField;
+  const f2  = f1.bind(i64);
+  return f2();
 };
 
 export function u64toU32(i) {

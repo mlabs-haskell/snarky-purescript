@@ -36,6 +36,7 @@ import SnarkyPS.Lib.CircuitValue.Data
 import SnarkyPS.Lib.Provable
 import SnarkyPS.Lib.Hash
 
+
 {- IMPORTANT! NOTE:
 
    We don't do `hashFields []` because `hashFields [] == hashFields [field 0] == hashFields [toField $ bool false]`
@@ -46,31 +47,23 @@ import SnarkyPS.Lib.Hash
          We can't remove that vulnerability entirely (nature of hash functions), but
          requiring the user to provide a salt value makes it a *lot* harder. (ATM attacker just
          needs to find some value that hashes to 0.)
-
 -}
+
 emptyHash :: Hash
 emptyHash = fieldToHash (field 0)
 
--- It's awkward to make Structs and Enums CircuitValue instances, here we need the `toFields` part of CV
-class ToFields (t :: Type) where
-  toFields_ :: t -> Array Field
-
-instance ToFields (Struct r) where
-  toFields_ = forgetStruct
-else instance ToFields (Enum r) where
-  toFields_ = forgetEnum
-else instance CircuitValue t => ToFields t where
-  toFields_ = unsafeCoerce <<< toFields (Proxy :: Proxy t)
-
-hashCV :: forall t. ToFields t => t -> Hash
-hashCV = hashFields <<< toFields_
+hashCV :: forall t. CircuitValue t => t -> Hash
+hashCV = hashFields' <<< toFields (Proxy :: Proxy t)
 
 foreign import unsafeHead :: forall (t :: Type). Array t -> t
 
+{- Class for matching on ZkEnums. TODO: Explain how it works -}
+
+-- NEED THE STUPID BIDIRECTIONAL FUNDEPS ADFOJISDFJIODSFIOJ
 class MatchE :: RowList Type -> Row Type -> RowList Type -> Row Type -> Type -> Constraint
-class MatchE pList pRow zList zRow result | pList -> pRow, zList -> zRow  where
+class MatchE pList pRow zList zRow result | pList -> pRow, zList -> zRow, pList -> zList, zList -> pList where
   -- we need to pass in a default `result` value to make this work
-  caseOn_ :: result -> Proxy pList -> Proxy zList -> Record pRow -> Enum zRow -> result
+  caseOn_ :: result -> Proxy pList -> Proxy zList -> Record pRow -> Zk (Variant zRow)  -> result
 
 instance (
     IsSymbol l
@@ -79,7 +72,6 @@ instance (
   , RowToList r' (Cons l a Nil)
   , PR.Cons l b () r
   , PR.Cons l a () r'
-  , Sized res
   , CircuitValue res
   ) => MatchE (Cons l b Nil) r (Cons l a Nil) r' res where
   caseOn_ res pList zList pRec zEnum =
@@ -89,14 +81,23 @@ instance (
         matcher :: b
         matcher = Rec.get label pRec
 
-        aFields = drop 1 $ forgetEnum zEnum
+        aFields :: Array Field
+        aFields = drop 1 $ forgetZk' zEnum
 
+        aIndex :: Field
         aIndex = unsafeHead aFields
 
+        aHash :: Hash
         aHash = hashFields aFields
+
+        onMatch :: res
+        onMatch = runMatch res aFields matcher
+
+        onFail :: res
+        onFail = res
     in zkIf (aIndex #== field 1)  -- We know the index here has to be 1 b/c we're out of Variant to traverse
-         (runMatch res aFields matcher )
-         (res)
+         (onMatch)
+         (onFail)
 else instance (
     IsSymbol l
   , Matchable a b res
@@ -108,13 +109,12 @@ else instance (
   , MatchE pListRest pRowRest zListRest zRowRest res
   , Index l (Cons l a zListRest) zRowFull ix
   , IsNat ix
-  , Sized res
   , CircuitValue res
   ) => MatchE (Cons l b pListRest) pRowFull (Cons l a zListRest) zRowFull res where
   caseOn_ res pList zList pRec zEnum =
     zkIf (i #== ix)
       (runMatch res valFields b)
-      (g (unsafeCoerce zEnum :: Enum zRowRest))
+      (g (unsafeCoerce zEnum :: ZkEnum zRowRest))
    where
      l :: Proxy l
      l = Proxy
@@ -122,7 +122,7 @@ else instance (
      b :: b
      b = Rec.get l pRec
 
-     fields = forgetEnum zEnum
+     fields = forgetZk' zEnum
  
      i = unsafeHead fields
      ix = field <<< BI.fromInt $ reflectNat (Proxy :: Proxy ix)
@@ -134,8 +134,10 @@ else instance (
      pListRest = Proxy :: Proxy pListRest
      zListRest = Proxy :: Proxy zListRest
 
-caseOn :: forall t m r. Sized r => Matchable t m r => ToFields t => r -> t -> m -> r
-caseOn res t m = runMatch res (unsafeCoerce (toFields_ t) :: Array Field)  m
+
+-- Interestingly, this only works if we have the type application annotation thingy (though we never use it???)
+caseOn :: forall @t m r. CircuitValue r => CircuitValue t => Matchable t m r => r -> t -> m -> r
+caseOn res t m = runMatch @t @m @r res (forgetZk' <<< toZk $ t) m
 
 data Match t r = Match t r
 
@@ -147,16 +149,15 @@ instance (
       MatchE pList pRow zList zRow result
     , RowToList pRow pList
     , RowToList zRow zList
-    , Sized result
     , CircuitValue result
-    ) => Matchable (Enum zRow) (Record pRow) result where
+    ) => Matchable (Zk (Variant zRow)) (Record pRow) result where
   runMatch res e r = caseOn_
-                       res
+                       (res)
                        (Proxy :: Proxy pList)
                        (Proxy :: Proxy zList)
-                       r
-                       (unsafeCoerce e :: Enum zRow)
-
+                       (r)
+                       (unsafeCoerce e :: ZkEnum zRow)
+{-
 instance (
       ZkFromData Record Struct r zR
     , ToFields (Record r)
@@ -169,38 +170,40 @@ instance (
       zkIf (hashFields rFields #== hashCV r')
         (res)
         (runMatch def rFields t)
+-}
 
-instance (Sized r, CircuitValue r) => Matchable Bool (Array (Match Boolean r)) r where
+
+instance CircuitValue r => Matchable Bool (Array (Match Boolean r)) r where
   runMatch res bFields arr = case uncons arr of
-    Nothing -> res
+    Nothing ->  res
     Just {head: Match b' r, tail: t} ->
       zkIf (hashFields bFields  #== hashCV (bool b'))
         (r)
         (runMatch res bFields t)
 
-instance (Sized r, CircuitValue r) => Matchable U64 (Array (Match Int r)) r where
+instance CircuitValue r => Matchable U64 (Array (Match Int r)) r where
   runMatch res uFields arr = case uncons arr of
-    Nothing -> res
+    Nothing ->  res
     Just {head: Match u' r, tail: t} ->
       zkIf (hashFields uFields #== hashCV (u64 u'))
         (r)
         (runMatch res uFields t)
 
-instance (Sized r, CircuitValue r) => Matchable Field (Array (Match Field r)) r where
+instance CircuitValue r => Matchable Field (Array (Match Field r)) r where
   runMatch res fFields arr = case uncons arr of
-    Nothing -> res
+    Nothing ->  res
     Just {head: Match l' r, tail: t} ->
       zkIf (hashFields fFields #== hashFields [l'])
         (r)
         (runMatch res fFields t)
 
+-- make this generic so you don't need instances for everything
 
-mkMatch :: forall t r. t -> r -> Match t r
+instance CircuitValue r => Matchable ZUnit (Match ZUnit r) r where
+  runMatch def u (Match _ r) = r
+
+mkMatch :: forall t r. CircuitValue r => t ->  r -> Match t r
 mkMatch t r = Match t r
 
 infixl 0 mkMatch as ==>
 
--- make this generic so you don't need instances for everything
-
-instance Sized r => Matchable ZkUnit  (Match ZkUnit r) r where
-  runMatch def u (Match _ r) = r

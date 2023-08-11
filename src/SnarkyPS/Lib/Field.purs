@@ -10,8 +10,12 @@ import Type.Proxy
 import Data.Maybe
 import Data.HeytingAlgebra
 import SnarkyPS.Lib.Context
+import Unsafe.Coerce (unsafeCoerce)
 
 foreign import data Field :: Type
+
+
+
 
 {- We have to define the primitive FieldLikes here to avoid circular dependencies
    while keeping the module structure sane.

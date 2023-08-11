@@ -3,25 +3,16 @@
 -}
 
 module SnarkyPS.Lib.CircuitValue.Data (
-    class ZkData
-  , zkMorph
-  , class GetField
+    class GetField
   , getField
   , get
   , inj
-  , class Sized
-  , sizeInFields_
-  , class SizedList
-  , sizeL
   , class Locate
   , loc
-  , module EXPORT
-  , class FromFields
-  , fromFields_
-  , class ZkFromDataRow
-  , class ZkDataRow
-  , class ZkFromData
-  , class Gettable
+  , class IsZkL
+  , class IsZk
+  , coerceFromZk
+  , coerceToZk
   ) where
 
 import Prelude hiding (Void)
@@ -57,114 +48,6 @@ import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.Bool
 import SnarkyPS.Lib.FieldClasses
 import SnarkyPS.Lib.CircuitValue.Class
-import SnarkyPS.Lib.CircuitValue.Class (class CircuitValue, sizeInFields, toFields, check,  Struct, Enum, forgetStruct, forgetEnum) as EXPORT
-
-
-
-{-
-    Machinery for transforming Records/Variants into the Core Data Abstractions (Structs/Enums)
--}
-class ZkDataRow :: RowList Type -> Row Type -> RowList Type -> Row Type -> Constraint
-class ZkDataRow psList psRow zkList zkRow | psList -> psRow, psList -> zkList, zkList -> zkRow
-
-instance ZkDataRow Nil () Nil ()
-else instance (
-    ZkDataRow rl r rl' r'
-  , RowToList r rl
-  , RowToList r' rl'
-  , PR.Cons label (Record r) rowRest rowFull
-  , PR.Cons label (Struct r') zkRowRest zkRowFull
-  , RowToList rowFull (Cons label (Record r) listRest)
-  , RowToList zkRowFull (Cons label (Struct r') zkListRest)
-  , IsSymbol label
-  , ZkDataRow listRest rowRest  zkListRest zkRowRest
-  ) => ZkDataRow (Cons label (Record r) listRest) rowFull (Cons label (Struct r') zkListRest) zkRowFull
-else instance (
-    ZkDataRow rl r rl' r'
-  , RowToList r rl
-  , RowToList r' rl'
-  , PR.Cons label (Variant r) rowRest rowFull
-  , PR.Cons label (Enum r') zkRowRest zkRowFull
-  , RowToList rowFull (Cons label (Variant r) listRest)
-  , RowToList zkRowFull (Cons label (Enum r') zkListRest)
-  , IsSymbol label
-  , ZkDataRow listRest rowRest zkListRest zkRowRest
-  ) => ZkDataRow (Cons label (Variant r) listRest) rowFull (Cons label (Enum r') zkListRest) zkRowFull
-else instance (
-    ZkData f g ps zk
-  , PR.Cons label (f ps) rowRest rowFull
-  , PR.Cons label (g zk) zkRowRest zkRowFull
-  , RowToList rowFull (Cons label (f ps) listRest)
-  , RowToList zkRowFull (Cons label (g zk) zkListRest)
-  , IsSymbol label
-  , ZkDataRow listRest rowRest zkListRest zkRowRest
-  ) => ZkDataRow (Cons label (f ps) listRest) rowFull (Cons label (g zk) zkListRest) zkRowFull
-else instance (
-    Sized t
-  , PR.Cons label t rowRest rowFull
-  , PR.Cons label t zkRowRest zkRowFull
-  , RowToList rowFull (Cons label t listRest)
-  , RowToList zkRowFull (Cons label t zkListRest)
-  , IsSymbol label
-  , ZkDataRow listRest rowRest zkListRest zkRowRest
-  ) => ZkDataRow (Cons label t listRest) rowFull (Cons label t zkListRest) zkRowFull
-
-class ZkFromDataRow :: RowList Type -> Row Type ->  RowList Type -> Row Type -> Constraint
-class ZkDataRow psL psR zkL zkR <= ZkFromDataRow zkL zkR  psL psR  | zkL -> psL, zkL -> zkR, psL -> psR
-instance ZkDataRow psL psR zkL zkR => ZkFromDataRow zkL zkR psL psR
-
--- For transforming Records/Variants into Structs/Enums - Type version
-class ZkData :: (Row Type -> Type) -> (Row Type -> Type) -> Row Type  -> Row Type -> Constraint
-class ZkData f g ps zk | zk -> ps, f -> g  where
-  zkMorph :: f ps -> g zk
-instance (ZkDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, CircuitValue (Record psR)) => ZkData Record Struct psR zkR where
-  zkMorph = Struct <<< fieldsToArr <<< toFields (Proxy :: Proxy (Record psR))
-instance (ZkDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL,  CircuitValue (Variant psR)) => ZkData Variant Enum psR zkR  where
-  zkMorph = Enum <<< fieldsToArr <<< toFields (Proxy :: Proxy (Variant psR))
-instance ZkData Enum Enum r r where
-  zkMorph = identity
-instance ZkData Struct Struct r r where
-  zkMorph = identity
-
-{- TODO: Figure out why we need this! I really don't understand why ZkData isn't sufficient in every case :-( -}
-class ZkFromData :: (Row Type -> Type) -> (Row Type -> Type) -> Row Type  -> Row Type -> Constraint
-class ZkFromData f g ps zk | ps -> zk, g -> f
-instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL, CircuitValue (Record psR)) => ZkFromData Record Struct psR zk
-instance (ZkFromDataRow psL psR zkL zkR, RowToList psR psL, RowToList zkR zkL,  CircuitValue (Variant psR)) => ZkFromData Variant Enum psR zkR
-
-
-{-
-     Record  Utilities
--}
-
-class SizedList :: RowList Type -> Row Type -> Constraint
-class SizedList list row | list -> row where
-  sizeL :: Proxy list -> Proxy row -> SizeInFields
-
-instance SizedList Nil () where
-  sizeL _ _ = intToSize 0
-else instance (
-    Sized t
-  , PR.Lacks label rowRest
-  , PR.Cons label t rowRest rowFull
-  , RowToList rowFull (Cons label t listRest)
-  , IsSymbol label
-  , SizedList listRest rowRest
-  ) => SizedList (Cons label t listRest) rowFull where
-  sizeL _ _ = intToSize
-             $ (sizeToInt $ sizeInFields_ (Proxy :: Proxy t))
-               + (sizeToInt $ sizeL (Proxy :: Proxy listRest) (Proxy :: Proxy rowRest))
-
-class Sized ::  Type -> Constraint
-class Sized t where
-  sizeInFields_ :: Proxy t -> SizeInFields
-
-instance (SizedList zkList zkRow, RowToList zkRow zkList) => Sized (Struct zkRow) where
-  sizeInFields_ _ = sizeL (Proxy :: Proxy zkList) (Proxy :: Proxy zkRow)
-else instance (Sized (Variant zkRow)) => Sized (Enum zkRow) where
-  sizeInFields_ _ = sizeInFields_ (Proxy :: Proxy (Variant zkRow))
-else instance CircuitValue t => Sized t where
-  sizeInFields_ proxy = sizeInFields proxy
 
 type Loc = {size :: Int, rest :: Int}
 
@@ -177,11 +60,11 @@ class Locate list symbol where
 
 instance ( RowToList rowFull (Cons l t listRest)
          , PR.Cons l t rowRest rowFull
-         , SizedList listRest rowRest
-         , Sized t
+         , CircuitValueRL listRest rowRest
+         , CircuitValue t
          ) => Locate (Cons l t listRest) l where
-  loc  _ _ = let size = sizeToInt $ sizeInFields_ (Proxy :: Proxy t)
-                 rest = sizeToInt $ sizeL (Proxy :: Proxy listRest) (Proxy :: Proxy rowRest)
+  loc  _ _ = let size = sizeToInt $ sizeInFields (Proxy :: Proxy t)
+                 rest = sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
              in {size: size, rest: rest}
 else instance (Locate listRest  symbol) => Locate (Cons l t listRest) symbol where
   loc _ _ =  loc (Proxy :: Proxy listRest) (Proxy :: Proxy symbol)
@@ -189,7 +72,7 @@ else instance (Locate listRest  symbol) => Locate (Cons l t listRest) symbol whe
 {- This gets us the indices for the slice -}
 getIndex :: forall @label @list row
          . RowToList row list =>
-           SizedList list row =>
+           CircuitValueRL list row =>
            Locate list label =>
            Tuple Int Int
 getIndex = Tuple l r
@@ -199,55 +82,78 @@ getIndex = Tuple l r
    l = totalSize - (size + rest)
    r = totalSize - rest
    pos = loc (Proxy :: Proxy list) (Proxy :: Proxy label)
-   totalSize = sizeToInt $ sizeL (Proxy :: Proxy list) (Proxy :: Proxy row)
+   totalSize = sizeToInt $ sizeInFieldsL (Proxy :: Proxy list)
+
+-- don't need methods here, we're just going to unsafeCoerce in the arg class
+class IsZkL :: RowList Type -> Row Type -> RowList Type -> Row Type -> Constraint
+class IsZkL list row zList zRow | list -> row, zList -> zRow, list -> zList, row -> zRow
+
+instance IsZkL Nil () Nil ()
+else instance (
+    IsZkL lRest rRest zlRest zrRest
+  , IsZk a zA
+  , RowToList rRest lRest
+  , RowToList zrRest zlRest
+  , PR.Cons lbl a rRest rFull
+  , PR.Cons lbl zA zrRest zrFull
+  , IsSymbol lbl
+  ) => IsZkL (Cons lbl a lRest) rFull (Cons lbl zA zlRest) zrFull
+
+class IsZk :: Type -> Type -> Constraint
+class IsZk a za | a -> za, za -> a
+
+instance (
+    IsZkL list row zList zRow
+  , RowToList row list
+  , RowToList zRow zList
+  , CircuitValue (Record row)
+  ) => IsZk (Record row) (Record zRow)
+else instance (
+    IsZkL list row zList zRow
+  , RowToList row list
+  , RowToList zRow zList
+  , CircuitValue (Variant row)
+  ) => IsZk (Variant row) (Variant zRow)
+else instance (
+    CircuitValue a
+  ) => IsZk a a
+
+coerceFromZk :: forall a' a. IsZk a a' => Zk a' -> Zk a
+coerceFromZk = unsafeCoerce
+
+coerceToZk :: forall a a'. IsZk a a' => Zk a -> Zk a'
+coerceToZk = unsafeCoerce
 
 
-{- Need this to avoid making Struct and Enum CircuitValues. They could be,
-   but then we'd have to shove EVERYTHING into Class.purs.
-
-   Super unsafe! Only for internal use!
--}
-
-class FromFields t where
-  {-| DO NOT USE THIS -}
-  fromFields_ :: Proxy t -> Array Field -> t
-
--- super unsafe instances for Struct/Enum
-instance FromFields (Enum row) where
-  fromFields_ _ = Enum
-else instance FromFields (Struct row) where
-  fromFields_ _ = Struct
-else instance CircuitValue t => FromFields t where
-  fromFields_ proxy = unsafePartial fromJust <<< fromFields proxy <<< arrToFields
-
-{- Simplified constraint for use in Prelude -}
-
-class (Sized a, FromFields a) <= Gettable a
-instance (Sized a, FromFields a) => Gettable a
 
 {- Solely to avoid constraint noise & reduce the need for type applications & proxies -}
-class GetField :: Symbol -> Type -> RowList Type -> Row Type  -> Constraint
-class GetField label t list row | list -> row, label row -> t where
-  getField :: Proxy label -> Proxy list -> Proxy row -> Struct row -> t
+class GetField :: Symbol -> Type -> Type -> RowList Type -> Row Type  -> Constraint
+class GetField label t t' list row | list -> row, label row -> t, t -> t' where
+  getField :: Proxy label -> Proxy list -> Proxy row -> Proxy t -> ZkStruct row ->  Zk t'
 
-instance ( FromFields t
+instance ( CircuitValue t
+         , IsZk t t'
          , RowToList row list
-         , SizedList list row
+         , CircuitValueRL list row
          , IsSymbol label
          , Locate list label
          , PR.Cons label t rowRest row -- Note: Need this for the compiler to infer the type of `t` (tho you'd think the fundep in GetField would suffice?)
-         ) => GetField label t list row where
-  getField label list row = fromFields_ (Proxy :: Proxy t) <<< slice l r <<< forgetStruct
+         ) => GetField label t t' list row where
+  getField label list row t = unsafeZk @t'  <<< slice l r <<< forgetZk'
     where
+      unsafeZk :: forall (@t :: Type). Array Field -> Zk t'
+      unsafeZk = unsafeCoerce
+
       Tuple l r = getIndex @label @list
 
 {- This the one people should actually use -}
-get :: forall @label t row list
-    . GetField label t list row
+get :: forall @label t t' row list
+    . GetField label t t' list row
     => RowToList row list
-    => Struct row
-    -> t
-get = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row)
+    => IsZk t t' -- just to be extra sure the compiler does its job -_-
+    => ZkStruct row
+    -> Zk t'
+get = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row) (Proxy :: Proxy t)
 
 {- Create a Variant -}
 inj :: forall @sym a r1 r2. PR.Cons sym a r1 r2 => IsSymbol sym => a -> V.Variant r2

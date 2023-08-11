@@ -8,6 +8,10 @@ import Prelude hiding (Void)
 
 import Data.BigInt
 import Data.BigInt as BI
+import Data.Semiring
+import Data.Ring
+import Data.CommutativeRing
+
 import Type.Data.Symbol
 import Type.Proxy
 import Type.RowList (class RowToList, class ListToRow, class RowListNub, Cons, Nil, RowList)
@@ -26,6 +30,11 @@ import Simple.JSON
 import Data.Variant
 import Type.Data.Peano.Nat
 
+import Partial
+import Partial.Unsafe
+import Unsafe.Coerce
+import Data.Maybe
+
 import SnarkyPS.Lib.Field
 import SnarkyPS.Lib.Context
 import SnarkyPS.Lib.Int
@@ -38,11 +47,6 @@ import SnarkyPS.Lib.FieldClasses
 foreign import checkEmptyRec :: forall (row :: Row Type). Record row -> Assertion
 
 foreign import checkEmptyVar :: forall (row :: Row Type). Variant row -> Assertion
-
-{- Hash stuff for toInput , maybe delete if not needed -}
-foreign import emptyHash :: HashInput
-
-foreign import appendHash :: HashInput -> HashInput -> HashInput
 
 
 {-
@@ -117,25 +121,6 @@ else instance (
         sizeRest =  sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
     in intToSize (sizeT + sizeRest)
 
-{-
-  toInputL _ rec = appendHash thisHash restHash
-    where
-      thisHash = toInput arg
-
-      restHash = toInputL listRest rowRest
-
-      key :: Proxy label
-      key = Proxy
-
-      arg :: t
-      arg = get key rec
-
-      listRest :: Proxy listRest
-      listRest = Proxy
-
-      rowRest :: Record rowRest
-      rowRest = delete key rec
--}
   checkL _ rec =
     let key = Proxy :: Proxy label
     in assertAndThen (check (get key rec)) $
@@ -194,29 +179,22 @@ else instance (
   check = checkEL (Proxy :: Proxy list)
 
   fromFields _ = fromFieldsEL (Proxy :: Proxy list) (Proxy :: Proxy row)
+-- Zk instance (replaces Struct and Enum)
 else instance (
-    CircuitValue (Variant row)
-  ) => CircuitValue (Enum row) where
-  toFields _ = arrToFields <<< forgetEnum
-  sizeInFields _ = sizeInFields (Proxy :: Proxy (Variant row))
-  check _ = assertTrue "check enum CV" (bool true)
-  -- NOTE TODO FIXME: UNSAFE AS HELL
-  fromFields _ = Just <<< Enum <<< fieldsToArr
-else instance (
-    CircuitValue (Record row)
-  ) => CircuitValue (Struct row) where
-  toFields _ = arrToFields <<< forgetStruct
-  sizeInFields _ = sizeInFields (Proxy :: Proxy (Record row))
-  check _ = assertTrue "check struct CV" (bool true)
-  -- NOTE TODO FIXME: UNSAFE AS HELL
-  fromFields _ = Just <<< Struct <<< fieldsToArr
+    CircuitValue t
+  ) => CircuitValue (Zk t) where
+  toFields _ = forgetZk
+
+  sizeInFields _ = sizeInFields (Proxy :: Proxy t)
+
+  check = check <<< fromZk
+
+  fromFields _ = map toZk <<< fromFields (Proxy :: Proxy t)
 -- Bare Fieldlike instance
 else instance FieldLike t => CircuitValue t where
   toFields _ t = arrToFields [toField t]
 
   sizeInFields _ = intToSize 1
-
-  --toInput = fieldLikeToInput
 
   check = checkField
 
@@ -347,33 +325,6 @@ else instance (
         ix' = BI.fromInt (reflectNat (Proxy :: Proxy ix))
 
 
-{-
-    Core Data Abstractions & Helpers
--}
-
--- Don't export the constructors!
-
--- Record abstraction for zk circuits
-newtype Struct :: Row Type -> Type
-newtype Struct row = Struct (Array Field)
-
-instance Show (Struct r) where
-  show (Struct r) = "Struct " <> show r
-
--- Variant abstraction for zk circuits
-newtype Enum :: Row Type -> Type
-newtype Enum row = Enum (Array Field)
-
-instance Show (Enum r) where
-  show (Enum r) = "Enum " <> show r
-
-forgetStruct :: forall (row :: Row Type). Struct row -> Array Field
-forgetStruct (Struct inner) = inner
-
-forgetEnum :: forall (row :: Row Type). Enum row -> Array Field
-forgetEnum (Enum inner) = inner
-
-
 {- Misc helpers. Don't expose these in the Prelude -}
 
 sizeToInt :: SizeInFields -> Int
@@ -387,3 +338,75 @@ arrToFields = unsafeCoerce
 
 fieldsToArr :: Fields -> Array Field
 fieldsToArr = unsafeCoerce
+
+{- Zk Utilities, should be in Field.purs but here for staging/module hierarchy reasons -}
+
+{- This is how we represent an `Array Field` which *we* know corresponds to a particular circuit type
+
+  I really wanted to avoid this, but I don't think we ultimately can. Type inference w/ the Struct/Enum stuff is too
+  fragile.
+
+  Ideally this would be a Functor/Applicative/Monad, but it can't satisfy the laws. It could be a *constrained* monad,
+  but afaict there isn't a nice library for those in PS and since we don't have RebindableSyntax it'd be ugly as hell.
+-}
+foreign import data Zk :: Type -> Type
+
+forgetZk :: forall t. Zk t -> Fields
+forgetZk = unsafeCoerce
+
+forgetZk' :: forall t. Zk t -> Array Field
+forgetZk' = unsafeCoerce
+
+withZk :: forall t r. Zk t -> (Fields -> r) -> r
+withZk zk f = f (forgetZk zk)
+
+asZk :: forall t r. CircuitValue t => t -> (Zk t -> r) -> r
+asZk t f = f (toZk t)
+
+unZk :: forall t r. CircuitValue t => Zk t -> (t -> r) -> r
+unZk zt f = f (fromZk zt)
+
+fromZk :: forall (t :: Type). CircuitValue t => Zk t -> t
+fromZk af = withZk af $ \arr -> unsafePartial fromJust (fromFields (Proxy :: Proxy t) arr)
+
+toZk :: forall (t :: Type). CircuitValue t => t -> Zk t
+toZk t = unsafeCoerce $ toFields (Proxy :: Proxy t) t
+
+-- type synonyms for convenience
+
+type ZkStruct :: Row Type -> Type
+type ZkStruct row = Zk (Record row)
+
+type ZkEnum :: Row Type -> Type
+type ZkEnum row = Zk (Variant row)
+
+instance (ZkEq t, CircuitValue t) => ZkEq (Zk t) where
+  zkEq z1 z2 = zkEq (fromZk z1) (fromZk z2)
+  zkAssertEq msg z1 z2 = zkAssertEq msg (fromZk z1) (fromZk z2)
+
+instance (ZkOrd t, CircuitValue t) => ZkOrd (Zk t) where
+  zkLT b1 b2 =  (fromZk b1) #<  (fromZk b2)
+  assertLT msg b1 b2 = assertLT  msg (fromZk b1) (fromZk b2)
+  zkLTE b1 b2 =  (fromZk b1) #<=  (fromZk b2)
+  assertLTE msg b1 b2 = assertLTE msg (fromZk b1) (fromZk b2)
+  zkGT b1 b2 = (fromZk b1) #> (fromZk b2)
+  assertGT msg b1 b2 = assertGT msg (fromZk b1) (fromZk b2)
+  zkGTE b1 b2 = (fromZk b1) #>= (fromZk b2)
+  assertGTE msg b1 b2 = assertGTE msg (fromZk b1) (fromZk b2)
+
+
+-- convenience for instances
+
+zkBin :: forall t r. CircuitValue t => CircuitValue r => Zk t -> Zk t -> (t -> t -> r) -> Zk r
+zkBin z1 z2 f = toZk $ f (fromZk z1) (fromZk z2)
+
+instance (Semiring t, CircuitValue t) => Semiring (Zk t) where
+  add a b = zkBin a b add
+  zero    = toZk zero
+  mul a b = zkBin a b mul
+  one     = toZk one
+
+instance (Ring t, CircuitValue t) => Ring (Zk t) where
+  sub a b = zkBin a b sub
+
+instance (CommutativeRing t, CircuitValue t) => CommutativeRing (Zk t)

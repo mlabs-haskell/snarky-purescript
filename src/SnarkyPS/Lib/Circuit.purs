@@ -15,6 +15,7 @@ import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.FieldClasses
 import SnarkyPS.Lib.Bool
 import SnarkyPS.Lib.CircuitValue.Data
+import SnarkyPS.Lib.CircuitValue.Class
 
 import Effect
 import Effect.Aff
@@ -25,52 +26,37 @@ foreign import data Circuit :: Type -> Type -> Type
 foreign import debug :: forall t. t -> Effect Unit
 
 -- a is public, b is private
-foreign import mkCircuit_ :: forall a b
-                          . Fn3 (Fn2 a b Assertion) (Provable a) (Provable b) (Circuit a b)
+foreign import mkCircuit_ :: forall pub priv
+                          . Fn3 (Fn2 (Zk pub) (Zk priv) Assertion) (Provable (Zk pub)) (Provable (Zk priv)) (Circuit pub priv)
 
 foreign import data Proof :: Type -> Type -> Type
 
 -- TODO: Needs to be in aff or return a promise or both
-foreign import prove_ :: forall a b a' b'
-                         . Fn3 (Circuit a b) a' b' (Promise (Proof a b))
-
-foreign import bindToConstant :: Field -> Field
+foreign import prove_ :: forall pub priv
+                         . Fn3 (Circuit pub priv) (Zk pub) (Zk priv) (Promise (Proof pub priv))
 
 foreign import data Provable :: Type -> Type
 
 foreign import mkProvable :: forall (t :: Type). SizeInFields -> Provable t
 
-provableSized :: forall @t. Sized t => Provable t
-provableSized = mkProvable $ sizeInFields_ (Proxy :: Proxy t)
+foreign import provableSizeInFields :: forall t. Provable t -> Int
 
-provable :: forall @t. CircuitValue t => Provable t
-provable = mkProvable $ sizeInFields (Proxy :: Proxy t)
+zkProvable :: forall @t. CircuitValue t => Provable (Zk t)
+zkProvable = mkProvable $ sizeInFields (Proxy :: Proxy t)
 
-mkCircuit :: forall a b
-             . Sized a
-             => Sized b
-             => (a -> b -> Assertion)
-             -> Circuit a b
-mkCircuit f = runFn3 mkCircuit_ (mkFn2 f) privProvable pubProvable
+
+mkCircuit :: forall pub priv
+             . CircuitValue pub
+             => CircuitValue priv
+             => (Zk pub -> Zk priv -> Assertion)
+             -> Circuit pub priv
+mkCircuit f = runFn3 mkCircuit_ (mkFn2 f) pubProvable privProvable
   where
-    privProvable = mkProvable $ sizeInFields_ (Proxy :: Proxy a)
-    pubProvable  = mkProvable $ sizeInFields_ (Proxy :: Proxy a)
+    privProvable =  (zkProvable @priv)
+    pubProvable  =  (zkProvable @pub)
 
-prove :: forall (f :: Row Type -> Type)
-          (f' :: Row Type -> Type)
-          (g :: Row Type -> Type)
-          (g' :: Row Type -> Type)
-          (priv :: Row Type)
-          (pub :: Row Type)
-          (zPriv :: Row Type)
-          (zPub :: Row Type)
-      . ZkData f f' priv zPriv
-      => ZkData g g' pub zPub
-      => Circuit (f' zPriv) (g' zPub) -> f priv ->  g pub -> Aff (Proof (f' zPriv) (g' zPub))
-prove c priv pub = toAff $ runFn3 prove_ c zkPriv zkPub
-  where
-    zkPriv :: f' zPriv
-    zkPriv = zkMorph priv
-
-    zkPub :: g' zPub
-    zkPub = zkMorph pub
+prove :: forall  (pub :: Type) (priv :: Type)
+      . CircuitValue pub
+      => CircuitValue priv
+      => Circuit pub priv -> pub -> priv  -> Aff (Proof pub priv)
+prove c pub priv = toAff $ runFn3 prove_ c (toZk pub) (toZk priv)

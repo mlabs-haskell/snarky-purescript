@@ -7,7 +7,7 @@ import { Field } from "../../snarkydist/node/lib/field.js";
 export function mkCircuit_ (func,publicProver,privateProver) {
   const aCircuit  = {
     _main: {main: func, publicInputType: publicProver, privateInputType: privateProver},
-    __proto__: Circuit
+    __proto__: Circuit,
   }
 
   const keyPair = aCircuit.generateKeypair();
@@ -23,7 +23,10 @@ export function debug(x) {
   }
 };
 
-export async function prove_(circ,priv,pub) {
+export async function prove_(circ,pub,priv) {
+  console.log('Prove');
+  Provable.log(priv);
+  Provable.log(pub);
   const k1 = circ.generateKeypair;
   const keyPair = await circ.generateKeypair();
   const p1 = circ.prove;
@@ -41,3 +44,7 @@ export function bindToConstant(field) {
 export function mkProvable (size) {
   return Provable.Array(Field,size)
 };
+
+export function provableSizeInFields(provable) {
+  return provable.sizeInFields();
+}

@@ -33,14 +33,19 @@ foreign import logAndThen :: forall t res. t -> res -> res
 
 foreign import logAndThen_ :: forall t res. t -> res -> res
 
-zkIf :: forall a. Sized a => CircuitValue a => Bool -> a -> a -> a
-zkIf b t f = unsafePartial fromJust $ fromFields a (zkIf_ b prover  (toFields a t) (toFields a f))
+foreign import log :: forall t. t -> Unit
+
+foreign import log_ :: forall t. t -> Unit
+
+
+
+zkIf :: forall a. CircuitValue a => Bool -> a -> a -> a
+zkIf b t f = fromZk $ zkIf_ b prover (toZk t) (toZk f)
   where
     a :: Proxy a
     a = Proxy
 
-    prover :: Provable Fields
-    prover = unsafeCoerce (provable @a)
+    prover = zkProvable @a
 
-witness :: forall a. Sized a => (Unit -> a) -> a
-witness f = witness_ (provableSized @a) f
+witness :: forall a. CircuitValue a =>  (Unit -> Zk a) -> Zk a
+witness f = witness_ (zkProvable @a) f

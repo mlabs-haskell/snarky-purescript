@@ -29,7 +29,7 @@ export function bindContext(ca) {
 };
 
 export function assertMany(xs) {
-  return Array.forEach((x) => x);
+  return xs.forEach((x) => x);
 };
 
 export function assertAndThen(assertion) {

@@ -40,5 +40,15 @@ export function logAndThen_(x) {
   }
 };
 
+export function log(x) {
+  Provable.log(x);
+  return {};
+}
+
+export function log_(x) {
+  Provable.asProver( () => console.log(x) );
+  return {};
+}
+
 
 // switch seems kind of useless atm, but we could use it to build sum types...
