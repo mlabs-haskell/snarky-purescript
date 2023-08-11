@@ -42,9 +42,10 @@ module SnarkyPS.Lib.Prelude (
 
 import Unsafe.Coerce -- gonna be doing a toooonnn of this
 
-import Prelude (($), (<<<))
+import Prelude
 import Data.HeytingAlgebra
 import Prim.Row as PR
+import Prim.RowList
 
 import Data.Variant as V
 
@@ -155,3 +156,39 @@ second f tup =
       c :: c
       c = f (fromZk b)
   in a /\ c
+
+
+-- this is essentially a specialized Codensity monad
+unZkM :: forall a b. ZkM a -> (a -> Zk b) -> Zk b
+unZkM (ZkM f) = f
+
+newtype ZkM a = ZkM (forall b. (a -> Zk b) -> Zk b)
+
+instance Functor ZkM where
+  map f (ZkM g) = ZkM (\k -> g (k <<< f))
+
+instance Apply ZkM where
+  apply (ZkM f) (ZkM g) = ZkM (\k -> f (\l -> g (k <<< l)))
+
+instance Applicative ZkM where
+  pure x = ZkM (_ $ x)
+
+instance Bind ZkM where
+  bind (ZkM f) k = ZkM (\g -> (f (\x -> unZkM (k x) g)))
+
+instance Monad ZkM
+
+lift :: forall (a :: Type). CircuitValue a => Zk a -> ZkM a
+lift = pure <<< fromZk
+
+lower :: forall (a :: Type). CircuitValue a => ZkM a -> Zk a
+lower zk = unZkM zk toZk
+
+getM :: forall @label t t' row list
+    . GetField label t t' list row
+    => RowToList row list
+    => CircuitValue
+    => IsZk t t' -- just to be extra sure the compiler does its job -_-
+    => ZkStruct row
+    -> ZkM t'
+getM = lift <<< get @label
