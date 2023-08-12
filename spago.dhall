@@ -20,6 +20,7 @@ to generate this file without the comments in this block.
   , "bifunctors"
   , "bigints"
   , "console"
+  , "debug"
   , "effect"
   , "foreign"
   , "functions"

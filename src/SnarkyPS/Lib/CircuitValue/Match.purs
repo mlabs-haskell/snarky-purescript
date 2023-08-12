@@ -63,7 +63,7 @@ foreign import unsafeHead :: forall (t :: Type). Array t -> t
 class MatchE :: RowList Type -> Row Type -> RowList Type -> Row Type -> Type -> Constraint
 class MatchE pList pRow zList zRow result | pList -> pRow, zList -> zRow, pList -> zList, zList -> pList where
   -- we need to pass in a default `result` value to make this work
-  caseOn_ :: result -> Proxy pList -> Proxy zList -> Record pRow -> Zk (Variant zRow)  -> result
+  caseOn_ :: result -> Proxy pList -> Proxy zList -> Record pRow -> ZEnum zRow  -> result
 
 instance (
     IsSymbol l
@@ -82,7 +82,7 @@ instance (
         matcher = Rec.get label pRec
 
         aFields :: Array Field
-        aFields = drop 1 $ forgetZk' zEnum
+        aFields = drop 1 $ forgetEnum zEnum
 
         aIndex :: Field
         aIndex = unsafeHead aFields
@@ -114,7 +114,7 @@ else instance (
   caseOn_ res pList zList pRec zEnum =
     zkIf (i #== ix)
       (runMatch res valFields b)
-      (g (unsafeCoerce zEnum :: ZkEnum zRowRest))
+      (g (unsafeCoerce zEnum :: ZEnum zRowRest))
    where
      l :: Proxy l
      l = Proxy
@@ -122,7 +122,7 @@ else instance (
      b :: b
      b = Rec.get l pRec
 
-     fields = forgetZk' zEnum
+     fields = forgetEnum zEnum
  
      i = unsafeHead fields
      ix = field <<< BI.fromInt $ reflectNat (Proxy :: Proxy ix)
@@ -136,8 +136,8 @@ else instance (
 
 
 -- Interestingly, this only works if we have the type application annotation thingy (though we never use it???)
-caseOn :: forall @t m r. CircuitValue r => CircuitValue t => Matchable t m r => r -> t -> m -> r
-caseOn res t m = runMatch @t @m @r res (forgetZk' <<< toZk $ t) m
+caseOn :: forall @t @m @r. CircuitValue r => CircuitValue t => Matchable t m r => r -> t -> m -> r
+caseOn res t m =  runMatch res (forgetAsFields' <<< asFields $ t) m
 
 data Match t r = Match t r
 
@@ -150,13 +150,13 @@ instance (
     , RowToList pRow pList
     , RowToList zRow zList
     , CircuitValue result
-    ) => Matchable (Zk (Variant zRow)) (Record pRow) result where
+    ) => Matchable (ZEnum zRow) (Record pRow) result where
   runMatch res e r = caseOn_
                        (res)
                        (Proxy :: Proxy pList)
                        (Proxy :: Proxy zList)
                        (r)
-                       (unsafeCoerce e :: ZkEnum zRow)
+                       (unsafeCoerce e :: ZEnum zRow)
 {-
 instance (
       ZkFromData Record Struct r zR
@@ -202,7 +202,7 @@ instance CircuitValue r => Matchable Field (Array (Match Field r)) r where
 instance CircuitValue r => Matchable ZUnit (Match ZUnit r) r where
   runMatch def u (Match _ r) = r
 
-mkMatch :: forall t r. CircuitValue r => t ->  r -> Match t r
+mkMatch :: forall t r.  t ->  r -> Match t r
 mkMatch t r = Match t r
 
 infixl 0 mkMatch as ==>

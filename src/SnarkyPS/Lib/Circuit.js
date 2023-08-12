@@ -12,8 +12,6 @@ export function mkCircuit_ (func,publicProver,privateProver) {
 
   const keyPair = aCircuit.generateKeypair();
 
-  console.log(keyPair);
-
   return aCircuit;
 };
 
@@ -24,9 +22,6 @@ export function debug(x) {
 };
 
 export async function prove_(circ,pub,priv) {
-  console.log('Prove');
-  Provable.log(priv);
-  Provable.log(pub);
   const k1 = circ.generateKeypair;
   const keyPair = await circ.generateKeypair();
   const p1 = circ.prove;

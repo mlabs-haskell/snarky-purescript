@@ -37,15 +37,14 @@ foreign import log :: forall t. t -> Unit
 
 foreign import log_ :: forall t. t -> Unit
 
-
-
-zkIf :: forall a. CircuitValue a => Bool -> a -> a -> a
-zkIf b t f = fromZk $ zkIf_ b prover (toZk t) (toZk f)
+zkIf :: forall a. CircuitValue a =>  Bool -> a -> a -> a
+zkIf b t f = fromAsFields res
   where
     a :: Proxy a
     a = Proxy
 
-    prover = zkProvable @a
+    res :: AsFields a
+    res = zkIf_ b prover (asFields t) (asFields f)
 
-witness :: forall a. CircuitValue a =>  (Unit -> Zk a) -> Zk a
-witness f = witness_ (zkProvable @a) f
+    prover :: Provable (AsFields a)
+    prover = zkProvable @a

@@ -11,6 +11,7 @@ import Data.BigInt as BI
 import Data.Semiring
 import Data.Ring
 import Data.CommutativeRing
+import Prim.TypeError
 
 import Type.Data.Symbol
 import Type.Proxy
@@ -41,12 +42,37 @@ import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.Bool
 import SnarkyPS.Lib.FieldClasses
 
-{- Foreign imports -}
+import Debug
 
+{- NOTE: *** IMPORTANT ***
+
+  ZStruct and ZEnum really should not have CircuitValue instances! Rearrange typeclasses to fix that
+
+
+-}
+
+{- Debug utils -}
+
+traceMsg :: forall a b. DebugWarning => String -> a -> b -> b
+traceMsg msg toTrace b = trace (msg <> "\n")
+                         $ \_ -> trace toTrace
+                         $ \_ -> trace "\n"
+                         $ \_ -> b
+
+
+{- Foreign imports -}
 
 foreign import checkEmptyRec :: forall (row :: Row Type). Record row -> Assertion
 
 foreign import checkEmptyVar :: forall (row :: Row Type). Variant row -> Assertion
+
+class NonEmpty :: RowList Type -> Constraint
+class NonEmpty list
+
+instance NonEmpty (Cons l t res)
+else instance (
+  Fail (Text "Circuit Enums & Structs must not be empty!")
+ ) => NonEmpty Nil
 
 
 {-
@@ -73,19 +99,20 @@ class CircuitValueRL list row | list -> row where
 
   sizeInFieldsL :: Proxy list -> SizeInFields
 
-  -- Dunno if we really need it w/ simplifications made today?
-  -- toInputL :: Proxy list -> Record row -> HashInput
-
   checkL :: Proxy list -> Record row -> Assertion
 
+  -- This should be
+  -- Proxy list -> Proxy row -> Record row -> AsFields (Record row) -> Record row
+  -- Same for toFieldsL & all the other classes -__
+  -- B/c we don't use these to construct a SnarkyJS `Provable` anymore,
+  -- the class logic is messed up and can be fixed by making that change.
+  -- & then we can get rid of the stupid toZk/fromZk/etc functions that are super annoying
   fromFieldsL :: Proxy list -> Proxy row -> Fields -> Maybe (Record row)
 
 instance CircuitValueRL Nil () where
   toFieldsL _ _ = arrToFields []
 
   sizeInFieldsL _ = intToSize 0
-
-  -- toInputL _ _ = emptyHash
 
   checkL _  = checkEmptyRec
 
@@ -148,21 +175,19 @@ class CircuitValue t where
 
   toFields :: Proxy t -> t -> Fields
 
-  --toInput :: t -> HashInput
-
   check :: t -> Assertion
 
   fromFields :: Proxy t -> Fields -> Maybe t
--- Record Instance
+
+-- ZStruct
 instance (
     RowToList row list
   , CircuitValueRL list row
+  , NonEmpty list
   ) => CircuitValue (Record row) where
   toFields _ = toFieldsL (Proxy :: Proxy list)
 
   sizeInFields _ = sizeInFieldsL (Proxy :: Proxy list)
-
-  --toInput = toInputL (Proxy :: Proxy list)
 
   check rec = checkL (Proxy :: Proxy list) rec
 
@@ -171,6 +196,7 @@ instance (
 else instance (
     RowToList row list
   , CircuitValueEL list row
+  , NonEmpty list
   ) => CircuitValue (Variant row) where
   toFields _ = toFieldsEL (Proxy :: Proxy list)
 
@@ -179,17 +205,43 @@ else instance (
   check = checkEL (Proxy :: Proxy list)
 
   fromFields _ = fromFieldsEL (Proxy :: Proxy list) (Proxy :: Proxy row)
--- Zk instance (replaces Struct and Enum)
 else instance (
-    CircuitValue t
-  ) => CircuitValue (Zk t) where
-  toFields _ = forgetZk
+    CircuitValueRL list row
+  , RowToList row list
+  , NonEmpty list
+  ) => CircuitValue (ZStruct row) where
+  toFields _ = arrToFields <<< forgetStruct
 
-  sizeInFields _ = sizeInFields (Proxy :: Proxy t)
+  sizeInFields _ = sizeInFieldsL (Proxy :: Proxy list)
 
-  check = check <<< fromZk
+  -- TODO
+  check struct = assertTrue "" (bool true)
 
-  fromFields _ = map toZk <<< fromFields (Proxy :: Proxy t)
+  -- FIXME: This is bad!
+  fromFields _ = Just <<< unsafeCoerce
+    where
+      list = Proxy :: Proxy list
+      row  = Proxy :: Proxy row
+-- ZEnum
+
+else instance (
+    RowToList row list
+  , CircuitValueEL list row
+  , NonEmpty list
+  ) => CircuitValue (ZEnum row) where
+  toFields _ = arrToFields <<< forgetEnum
+
+  sizeInFields _ = sizeInFieldsEL (Proxy :: Proxy list)
+
+  check enum = assertTrue "" (bool true)
+
+  -- FIXME: This is bad!
+  fromFields _  = Just <<< unsafeCoerce
+    where
+      coerce :: Fields -> ZEnum row
+      coerce = unsafeCoerce
+      list = Proxy :: Proxy list
+      row  = Proxy :: Proxy row
 -- Bare Fieldlike instance
 else instance FieldLike t => CircuitValue t where
   toFields _ t = arrToFields [toField t]
@@ -236,8 +288,6 @@ class CircuitValueEL list row | list -> row  where
   toFieldsEL :: Proxy list -> Variant row -> Fields
 
   sizeInFieldsEL :: Proxy list -> SizeInFields
-
-  --toInputEL :: Proxy list -> Variant row -> HashInput
 
   checkEL :: Proxy list -> Variant row -> Assertion
 
@@ -339,7 +389,7 @@ arrToFields = unsafeCoerce
 fieldsToArr :: Fields -> Array Field
 fieldsToArr = unsafeCoerce
 
-{- Zk Utilities, should be in Field.purs but here for staging/module hierarchy reasons -}
+{- AsFields Utilities, should be in Field.purs but here for staging/module hierarchy reasons -}
 
 {- This is how we represent an `Array Field` which *we* know corresponds to a particular circuit type
 
@@ -349,64 +399,143 @@ fieldsToArr = unsafeCoerce
   Ideally this would be a Functor/Applicative/Monad, but it can't satisfy the laws. It could be a *constrained* monad,
   but afaict there isn't a nice library for those in PS and since we don't have RebindableSyntax it'd be ugly as hell.
 -}
-foreign import data Zk :: Type -> Type
+foreign import data AsFields :: Type -> Type
 
-forgetZk :: forall t. Zk t -> Fields
-forgetZk = unsafeCoerce
+forgetAsFields :: forall t. AsFields t -> Fields
+forgetAsFields = unsafeCoerce
 
-forgetZk' :: forall t. Zk t -> Array Field
-forgetZk' = unsafeCoerce
+forgetAsFields' :: forall t. AsFields t -> Array Field
+forgetAsFields' = unsafeCoerce
 
-withZk :: forall t r. Zk t -> (Fields -> r) -> r
-withZk zk f = f (forgetZk zk)
+withAsFields :: forall t r. AsFields t -> (Fields -> r) -> r
+withAsFields zk f = f (forgetAsFields zk)
 
-asZk :: forall t r. CircuitValue t => t -> (Zk t -> r) -> r
-asZk t f = f (toZk t)
+asAsFields :: forall t r. CircuitValue t => t -> (AsFields t -> r) -> r
+asAsFields t f = f (asFields t)
 
-unZk :: forall t r. CircuitValue t => Zk t -> (t -> r) -> r
-unZk zt f = f (fromZk zt)
+unAsFields :: forall t r. CircuitValue t => AsFields t -> (t -> r) -> r
+unAsFields zt f = f (fromAsFields zt)
 
-fromZk :: forall (t :: Type). CircuitValue t => Zk t -> t
-fromZk af = withZk af $ \arr -> unsafePartial fromJust (fromFields (Proxy :: Proxy t) arr)
+fromAsFields :: forall (t :: Type). CircuitValue t => AsFields t -> t
+fromAsFields af = withAsFields af $ \arr -> unsafePartial fromJust (fromFields (Proxy :: Proxy t) arr)
 
-toZk :: forall (t :: Type). CircuitValue t => t -> Zk t
-toZk t = unsafeCoerce $ toFields (Proxy :: Proxy t) t
+asFields :: forall (t :: Type). CircuitValue t => t -> AsFields t
+asFields t =  unsafeCoerce $ toFields (Proxy :: Proxy t) t
 
 -- type synonyms for convenience
 
-type ZkStruct :: Row Type -> Type
-type ZkStruct row = Zk (Record row)
+foreign import data ZStruct :: Row Type -> Type
 
-type ZkEnum :: Row Type -> Type
-type ZkEnum row = Zk (Variant row)
+forgetStruct :: forall (r :: Row Type). ZStruct r -> Array Field
+forgetStruct = unsafeCoerce
 
-instance (ZkEq t, CircuitValue t) => ZkEq (Zk t) where
-  zkEq z1 z2 = zkEq (fromZk z1) (fromZk z2)
-  zkAssertEq msg z1 z2 = zkAssertEq msg (fromZk z1) (fromZk z2)
+toStruct :: forall (r :: Row Type) (r' :: Row Type)
+         . CircuitValue (Record r)
+         => AsFieldsOf (Record r) (ZStruct r')
+         => Record r
+         -> ZStruct r'
+toStruct = unsafeCoerce <<< toFields (Proxy :: Proxy (Record r))
 
-instance (ZkOrd t, CircuitValue t) => ZkOrd (Zk t) where
-  zkLT b1 b2 =  (fromZk b1) #<  (fromZk b2)
-  assertLT msg b1 b2 = assertLT  msg (fromZk b1) (fromZk b2)
-  zkLTE b1 b2 =  (fromZk b1) #<=  (fromZk b2)
-  assertLTE msg b1 b2 = assertLTE msg (fromZk b1) (fromZk b2)
-  zkGT b1 b2 = (fromZk b1) #> (fromZk b2)
-  assertGT msg b1 b2 = assertGT msg (fromZk b1) (fromZk b2)
-  zkGTE b1 b2 = (fromZk b1) #>= (fromZk b2)
-  assertGTE msg b1 b2 = assertGTE msg (fromZk b1) (fromZk b2)
+-- | FOR INTERNAL USE ONLY
+fromStruct :: forall (r :: Row Type) (r' :: Row Type)
+           . CircuitValue (Record r)
+           => AsFieldsOf (Record r) (ZStruct r')
+           => ZStruct r'
+           -> Record r
+fromStruct  = unsafeFromFields @(Record r) <<< forgetStruct
+
+unsafeFromFields :: forall (@t :: Type). CircuitValue t => Array Field -> t
+unsafeFromFields = unsafePartial fromJust <<<  fromFields (Proxy :: Proxy t) <<< arrToFields
+
+foreign import data ZEnum :: Row Type -> Type
+
+forgetEnum :: forall (r :: Row Type). ZEnum r -> Array Field
+forgetEnum = unsafeCoerce
+
+toEnum :: forall (r :: Row Type) (r' :: Row Type)
+       . CircuitValue (Variant r)
+       => AsFieldsOf (Variant r) (ZEnum r')
+       => Variant r
+       -> ZEnum r'
+toEnum = unsafeCoerce <<< toFields (Proxy :: Proxy (Variant r))
+
+-- | FOR INTERNAL USE ONLY
+fromEnum :: forall (r :: Row Type) (r' :: Row Type)
+         . CircuitValue (Variant r)
+         => AsFieldsOf (Variant r) (ZEnum r')
+         => ZEnum r'
+         -> Variant r
+fromEnum = unsafeFromFields @(Variant r) <<< forgetEnum
+
+instance (ZkEq t, CircuitValue t) => ZkEq (AsFields t) where
+  zkEq z1 z2 = zkEq (fromAsFields z1) (fromAsFields z2)
+  zkAssertEq msg z1 z2 = zkAssertEq msg (fromAsFields z1) (fromAsFields z2)
+
+instance (ZkOrd t, CircuitValue t) => ZkOrd (AsFields t) where
+  zkLT b1 b2 =  (fromAsFields b1) #<  (fromAsFields b2)
+  assertLT msg b1 b2 = assertLT  msg (fromAsFields b1) (fromAsFields b2)
+  zkLTE b1 b2 =  (fromAsFields b1) #<=  (fromAsFields b2)
+  assertLTE msg b1 b2 = assertLTE msg (fromAsFields b1) (fromAsFields b2)
+  zkGT b1 b2 = (fromAsFields b1) #> (fromAsFields b2)
+  assertGT msg b1 b2 = assertGT msg (fromAsFields b1) (fromAsFields b2)
+  zkGTE b1 b2 = (fromAsFields b1) #>= (fromAsFields b2)
+  assertGTE msg b1 b2 = assertGTE msg (fromAsFields b1) (fromAsFields b2)
+
+-- helper class TODO: document what it's for
+
+-- don't need methods here, we're just going to unsafeCoerce in the arg class
+class AsFieldsOfL :: RowList Type -> Row Type -> RowList Type -> Row Type -> Constraint
+class AsFieldsOfL list row zList zRow | list -> row, zList -> zRow, list -> zList, row -> zRow
+
+instance AsFieldsOfL Nil () Nil ()
+else instance (
+    AsFieldsOfL lRest rRest zlRest zrRest
+  , AsFieldsOf a zA
+  , RowToList rRest lRest
+  , RowToList zrRest zlRest
+  , PR.Cons lbl a rRest rFull
+  , PR.Cons lbl zA zrRest zrFull
+  , IsSymbol lbl
+  ) => AsFieldsOfL (Cons lbl a lRest) rFull (Cons lbl zA zlRest) zrFull
+
+class AsFieldsOf :: Type -> Type -> Constraint
+class AsFieldsOf a za | a -> za, za -> a
+
+instance (
+    AsFieldsOfL list row zList zRow
+  , RowToList row list
+  , RowToList zRow zList
+  , CircuitValue (Record row)
+  ) => AsFieldsOf (Record row) (ZStruct zRow)
+else instance (
+    AsFieldsOfL list row zList zRow
+  , RowToList row list
+  , RowToList zRow zList
+  , CircuitValue (Variant row)
+  ) => AsFieldsOf (Variant row) (ZEnum zRow)
+else instance (
+    CircuitValue a
+  ) => AsFieldsOf a a -- maybe AsFieldsOf a (AsFields a)?
+
+coerceFromAsFields :: forall a' a. AsFieldsOf a a' => AsFields a' -> AsFields a
+coerceFromAsFields = unsafeCoerce
+
+coerceToAsFields :: forall a a'. AsFieldsOf a a' => AsFields a -> AsFields a'
+coerceToAsFields = unsafeCoerce
 
 
 -- convenience for instances
 
-zkBin :: forall t r. CircuitValue t => CircuitValue r => Zk t -> Zk t -> (t -> t -> r) -> Zk r
-zkBin z1 z2 f = toZk $ f (fromZk z1) (fromZk z2)
+zkBin :: forall t r. CircuitValue t => CircuitValue r => AsFields t -> AsFields t -> (t -> t -> r) -> AsFields r
+zkBin z1 z2 f = asFields $ f (fromAsFields z1) (fromAsFields z2)
 
-instance (Semiring t, CircuitValue t) => Semiring (Zk t) where
+instance (Semiring t, CircuitValue t) => Semiring (AsFields t) where
   add a b = zkBin a b add
-  zero    = toZk zero
+  zero    = asFields zero
   mul a b = zkBin a b mul
-  one     = toZk one
+  one     = asFields one
 
-instance (Ring t, CircuitValue t) => Ring (Zk t) where
+instance (Ring t, CircuitValue t) => Ring (AsFields t) where
   sub a b = zkBin a b sub
 
-instance (CommutativeRing t, CircuitValue t) => CommutativeRing (Zk t)
+instance (CommutativeRing t, CircuitValue t) => CommutativeRing (AsFields t)
