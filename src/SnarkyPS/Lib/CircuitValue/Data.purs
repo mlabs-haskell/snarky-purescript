@@ -3,16 +3,21 @@
 -}
 
 module SnarkyPS.Lib.CircuitValue.Data (
-    class GetField
+    class ZField
   , getField
-  , get
+  , setField
+  , get_
+  , set_
+  , over_
   , inj
+  , inj_
   , class Locate
   , loc
-  , class IsZkL
-  , class IsZk
-  , coerceFromZk
-  , coerceToZk
+
+  -- Monad
+  , ZkM (ZkM)
+  , unZkM
+  , liftFields
   ) where
 
 import Prelude hiding (Void)
@@ -54,26 +59,30 @@ type Loc = {size :: Int, rest :: Int}
 {- Helper typeclass to enable indexing into Structs. `loc` gives us the size of the
    element that corresponds to the label & the size of the remaining elements,
    which we use to get the [Field] slice that represents the corresponding element -}
-class Locate :: RowList Type -> Symbol -> Constraint
-class Locate list symbol where
-  loc :: Proxy list -> Proxy symbol -> Loc
+class Locate :: RowList Type -> Row Type -> Symbol -> Constraint
+class Locate list row symbol | list -> row  where
+  loc :: Proxy list -> Proxy row -> Proxy symbol -> Loc
 
 instance ( RowToList rowFull (Cons l t listRest)
          , PR.Cons l t rowRest rowFull
          , CircuitValueRL listRest rowRest
          , CircuitValue t
-         ) => Locate (Cons l t listRest) l where
-  loc  _ _ = let size = sizeToInt $ sizeInFields (Proxy :: Proxy t)
-                 rest = sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
-             in {size: size, rest: rest}
-else instance (Locate listRest  symbol) => Locate (Cons l t listRest) symbol where
-  loc _ _ =  loc (Proxy :: Proxy listRest) (Proxy :: Proxy symbol)
+         ) => Locate (Cons l t listRest) rowFull l where
+  loc  _ _ _ = let size = sizeToInt $ sizeInFields (Proxy :: Proxy t)
+                   rest = sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
+               in {size: size, rest: rest}
+else instance (
+    Locate listRest rowRest symbol
+  -- , RowToList rowFull (Cons l t listRest)
+  -- , PR.Cons l t rowRest rowFull
+  ) => Locate (Cons l t listRest) rowFull symbol where
+  loc _ _ _ =  loc (Proxy :: Proxy listRest) (Proxy :: Proxy rowRest) (Proxy :: Proxy symbol)
 
 {- This gets us the indices for the slice -}
 getIndex :: forall @label @list row
          . RowToList row list =>
            CircuitValueRL list row =>
-           Locate list label =>
+           Locate list row label =>
            Tuple Int Int
 getIndex = Tuple l r
  where
@@ -81,80 +90,110 @@ getIndex = Tuple l r
    rest = pos.rest
    l = totalSize - (size + rest)
    r = totalSize - rest
-   pos = loc (Proxy :: Proxy list) (Proxy :: Proxy label)
+   pos = loc (Proxy :: Proxy list) (Proxy :: Proxy row) (Proxy :: Proxy label)
    totalSize = sizeToInt $ sizeInFieldsL (Proxy :: Proxy list)
-
--- don't need methods here, we're just going to unsafeCoerce in the arg class
-class IsZkL :: RowList Type -> Row Type -> RowList Type -> Row Type -> Constraint
-class IsZkL list row zList zRow | list -> row, zList -> zRow, list -> zList, row -> zRow
-
-instance IsZkL Nil () Nil ()
-else instance (
-    IsZkL lRest rRest zlRest zrRest
-  , IsZk a zA
-  , RowToList rRest lRest
-  , RowToList zrRest zlRest
-  , PR.Cons lbl a rRest rFull
-  , PR.Cons lbl zA zrRest zrFull
-  , IsSymbol lbl
-  ) => IsZkL (Cons lbl a lRest) rFull (Cons lbl zA zlRest) zrFull
-
-class IsZk :: Type -> Type -> Constraint
-class IsZk a za | a -> za, za -> a
-
-instance (
-    IsZkL list row zList zRow
-  , RowToList row list
-  , RowToList zRow zList
-  , CircuitValue (Record row)
-  ) => IsZk (Record row) (Record zRow)
-else instance (
-    IsZkL list row zList zRow
-  , RowToList row list
-  , RowToList zRow zList
-  , CircuitValue (Variant row)
-  ) => IsZk (Variant row) (Variant zRow)
-else instance (
-    CircuitValue a
-  ) => IsZk a a
-
-coerceFromZk :: forall a' a. IsZk a a' => Zk a' -> Zk a
-coerceFromZk = unsafeCoerce
-
-coerceToZk :: forall a a'. IsZk a a' => Zk a -> Zk a'
-coerceToZk = unsafeCoerce
-
 
 
 {- Solely to avoid constraint noise & reduce the need for type applications & proxies -}
-class GetField :: Symbol -> Type -> Type -> RowList Type -> Row Type  -> Constraint
-class GetField label t t' list row | list -> row, label row -> t, t -> t' where
-  getField :: Proxy label -> Proxy list -> Proxy row -> Proxy t -> ZkStruct row ->  Zk t'
+class ZField :: Symbol -> Type -> RowList Type -> Row Type  -> Constraint
+class ZField label t list row | list -> row, label list -> t where
+  getField :: Proxy label -> Proxy list -> Proxy row -> ZStruct row -> AsFields t
+
+  setField :: Proxy label -> Proxy list -> Proxy row -> t -> ZStruct row -> ZStruct row
 
 instance ( CircuitValue t
-         , IsZk t t'
          , RowToList row list
          , CircuitValueRL list row
+         , NonEmpty list
          , IsSymbol label
-         , Locate list label
+         , Locate list row label
          , PR.Cons label t rowRest row -- Note: Need this for the compiler to infer the type of `t` (tho you'd think the fundep in GetField would suffice?)
-         ) => GetField label t t' list row where
-  getField label list row t = unsafeZk @t'  <<< slice l r <<< forgetZk'
+         ) => ZField label t list row where
+  getField label list row = unsafeCoerce  <<< slice l r <<< forgetStruct
     where
-      unsafeZk :: forall (@t :: Type). Array Field -> Zk t'
-      unsafeZk = unsafeCoerce
-
       Tuple l r = getIndex @label @list
 
-{- This the one people should actually use -}
-get :: forall @label t t' row list
-    . GetField label t t' list row
-    => RowToList row list
-    => IsZk t t' -- just to be extra sure the compiler does its job -_-
-    => ZkStruct row
-    -> Zk t'
-get = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row) (Proxy :: Proxy t)
+  setField label list row t struct =
+    let structArray = forgetStruct struct
+
+        Tuple l r = getIndex @label @list
+
+        tFields = forgetAsFields' $ toFields (Proxy :: Proxy t) t
+
+        before = slice 0 l structArray
+
+        after = slice r (length structArray) structArray
+
+        res = before <> tFields <> after
+
+    in unsafeCoerce res :: ZStruct row
+
+
+{- The interface for Prelude should be monadic, so these generally shouldn't be used directly -}
+get_ :: forall @label t row list
+    . RowToList row list
+    => ZField label t list row
+    => ZStruct row
+    -> AsFields t
+get_ = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row)
+
+set_ :: forall @label t row list
+    . RowToList row list
+    => ZField label t list row
+    => t
+    -> ZStruct row
+    -> ZStruct row
+set_ = setField label list row
+  where
+    label = Proxy :: (Proxy label)
+    list  = Proxy :: (Proxy list)
+    row   = Proxy :: (Proxy row)
+
+over_ :: forall @label t row list
+      . RowToList row list
+      => ZField label t list row
+      => CircuitValue t
+      => (t -> t)
+      -> ZStruct row
+      -> ZStruct row
+over_ f struct = set_ @label (f <<< unFields $ get_ @label struct) struct
 
 {- Create a Variant -}
 inj :: forall @sym a r1 r2. PR.Cons sym a r1 r2 => IsSymbol sym => a -> V.Variant r2
 inj = V.inj (Proxy :: Proxy sym)
+
+inj_ :: forall @sym r1 r2. PR.Cons sym ZUnit r1 r2 => IsSymbol sym => V.Variant r2
+inj_ = V.inj (Proxy :: Proxy sym) zUnit
+
+{-
+   A Codensity Monad where the `f` is specialized to `Zk`
+
+   Because `Codensity f` is a Monad for *any* f, we can use this to
+   implement something quite like a "Constrained Monad".
+
+   TODO: Move to its own module
+-}
+newtype ZkM a = ZkM (forall b. (a -> AsFields b) -> AsFields b)
+
+unZkM :: forall a b. ZkM a -> (a -> AsFields b) -> AsFields b
+unZkM (ZkM f) = f
+
+instance Functor ZkM where
+  map f (ZkM g) = ZkM (\k -> g (k <<< f))
+
+instance Apply ZkM where
+  apply (ZkM f) (ZkM g) = ZkM (\k -> f (\l -> g (k <<< l)))
+
+instance Applicative ZkM where
+  pure x = ZkM (_ $ x)
+
+instance Bind ZkM where
+  bind (ZkM f) k = ZkM (\g -> (f (\x -> unZkM (k x) g)))
+
+instance Monad ZkM
+
+runZkM :: forall a. ZkM (AsFields a) -> AsFields a
+runZkM zk = unZkM zk identity
+
+liftFields :: forall (a :: Type). CircuitValue a => AsFields a -> ZkM a
+liftFields = pure <<< unFields

@@ -11,6 +11,7 @@ import Data.BigInt as BI
 import Data.Semiring
 import Data.Ring
 import Data.CommutativeRing
+import Prim.TypeError
 
 import Type.Data.Symbol
 import Type.Proxy
@@ -41,13 +42,40 @@ import SnarkyPS.Lib.Int
 import SnarkyPS.Lib.Bool
 import SnarkyPS.Lib.FieldClasses
 
-{- Foreign imports -}
+import Debug
 
+foreign import unsafeIf :: forall (a :: Type). SizeInFields -> Bool -> a -> a -> a
+
+foreign import unsafeHead :: forall (a :: Type). Array a -> a
+
+{- NOTE: *** IMPORTANT ***
+
+  ZStruct and ZEnum really should not have CircuitValue instances! Rearrange typeclasses to fix that
+
+
+-}
+
+{- Debug utils -}
+
+traceMsg :: forall a b. DebugWarning => String -> a -> b -> b
+traceMsg msg toTrace b = trace (msg <> "\n")
+                         $ \_ -> trace toTrace
+                         $ \_ -> trace "\n"
+                         $ \_ -> b
+
+{- Foreign imports -}
 
 foreign import checkEmptyRec :: forall (row :: Row Type). Record row -> Assertion
 
 foreign import checkEmptyVar :: forall (row :: Row Type). Variant row -> Assertion
 
+class NonEmpty :: RowList Type -> Constraint
+class NonEmpty list
+
+instance NonEmpty (Cons l t res)
+else instance (
+  Fail (Text "Circuit Enums & Structs must not be empty!")
+ ) => NonEmpty Nil
 
 {-
 
@@ -69,29 +97,23 @@ not-all-that-complex types)
 -}
 class CircuitValueRL :: RowList Type -> Row Type -> Constraint
 class CircuitValueRL list row | list -> row where
-  toFieldsL :: Proxy list -> Record row -> Fields
+  toFieldsL :: Proxy list -> Record row -> AsFields (Record row)
 
   sizeInFieldsL :: Proxy list -> SizeInFields
 
-  -- Dunno if we really need it w/ simplifications made today?
-  -- toInputL :: Proxy list -> Record row -> HashInput
-
-  checkL :: Proxy list -> Record row -> Assertion
-
-  fromFieldsL :: Proxy list -> Proxy row -> Fields -> Maybe (Record row)
+  {- NOTE:
+      This (and all of the other fromFields methods) are safe IF AND ONLY IF
+      they're applied to an `AsFields t` that was originally constructed from
+      a `t` that has a CircuitValue instance.
+  -}
+  fromFieldsL :: Proxy list -> Proxy row -> AsFields (Record row) -> Record row
 
 instance CircuitValueRL Nil () where
-  toFieldsL _ _ = arrToFields []
+  toFieldsL _ _ = unsafeCoerce $ arrToFields []
 
   sizeInFieldsL _ = intToSize 0
 
-  -- toInputL _ _ = emptyHash
-
-  checkL _  = checkEmptyRec
-
-  fromFieldsL _ _ fields = case fieldsToArr fields of
-    [] -> Just {}
-    anythingElse -> Nothing
+  fromFieldsL _ _ fields = {}
 
 else instance (
     CircuitValue t
@@ -101,11 +123,11 @@ else instance (
   , IsSymbol label
   , CircuitValueRL listRest rowRest
   ) => CircuitValueRL (Cons label t listRest) rowFull where
-  toFieldsL _ rec = arrToFields $ fieldsT <> fieldsRest
+  toFieldsL _ rec = unsafeCoerce <<< arrToFields $ fieldsT <> fieldsRest
     where
-      fieldsT = fieldsToArr $ toFields (Proxy :: Proxy t) arg
+      fieldsT = forgetAsFields'  $ toFields (Proxy :: Proxy t) arg
 
-      fieldsRest = fieldsToArr $ toFieldsL (Proxy :: Proxy listRest) rowRest
+      fieldsRest = forgetAsFields' $ toFieldsL (Proxy :: Proxy listRest) rowRest
 
       key :: Proxy label
       key = Proxy
@@ -121,89 +143,83 @@ else instance (
         sizeRest =  sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
     in intToSize (sizeT + sizeRest)
 
-  checkL _ rec =
-    let key = Proxy :: Proxy label
-    in assertAndThen (check (get key rec)) $
-         checkL (Proxy :: Proxy listRest) (delete key rec)
-
-  fromFieldsL _ _ fields = case length arr >= sizeT of
-    true -> case fromFieldsRest of
-      Nothing -> Nothing
-      Just recRest -> case fromFields proxyT (arrToFields $ take sizeT arr) of
-       Nothing -> Nothing
-       Just t  ->  Just $ insert label t recRest
-    false -> Nothing
+  fromFieldsL _ _ fields' = insert label t recRest
    where
-     label  = Proxy :: Proxy label
-     proxyT = Proxy :: Proxy t
-     listRest = Proxy :: Proxy listRest
-     rowRest  = Proxy :: Proxy rowRest
-     arr   = fieldsToArr fields
+     arr   = forgetAsFields' fields'
      sizeT = sizeToInt $ sizeInFields proxyT
-     fromFieldsRest = fromFieldsL listRest rowRest  (arrToFields $ drop sizeT arr)
+     proxyT = Proxy :: Proxy t
+     label = Proxy :: Proxy label
+
+     t :: t
+     t = fromFields proxyT (unsafeCoerce (take sizeT arr) :: AsFields t)
+
+     recRest ::  Record rowRest
+     recRest = fromFieldsL listRest rowRest (unsafeCoerce (drop sizeT arr) :: AsFields (Record rowRest))
+       where
+         listRest = Proxy :: Proxy listRest
+         rowRest  = Proxy :: Proxy rowRest
 
 class CircuitValue :: Type -> Constraint
 class CircuitValue t where
   sizeInFields :: Proxy t -> SizeInFields
 
-  toFields :: Proxy t -> t -> Fields
+  toFields :: Proxy t -> t -> AsFields t
 
-  --toInput :: t -> HashInput
+  fromFields :: Proxy t -> AsFields t -> t
 
-  check :: t -> Assertion
-
-  fromFields :: Proxy t -> Fields -> Maybe t
--- Record Instance
+-- ZStruct
 instance (
     RowToList row list
   , CircuitValueRL list row
+  , NonEmpty list
   ) => CircuitValue (Record row) where
   toFields _ = toFieldsL (Proxy :: Proxy list)
 
   sizeInFields _ = sizeInFieldsL (Proxy :: Proxy list)
-
-  --toInput = toInputL (Proxy :: Proxy list)
-
-  check rec = checkL (Proxy :: Proxy list) rec
 
   fromFields _ = fromFieldsL (Proxy :: Proxy list) (Proxy :: Proxy row)
 -- Variant Instance
 else instance (
     RowToList row list
   , CircuitValueEL list row
+  , NonEmpty list
   ) => CircuitValue (Variant row) where
   toFields _ = toFieldsEL (Proxy :: Proxy list)
 
   sizeInFields _ = sizeInFieldsEL (Proxy :: Proxy list)
 
-  check = checkEL (Proxy :: Proxy list)
-
   fromFields _ = fromFieldsEL (Proxy :: Proxy list) (Proxy :: Proxy row)
--- Zk instance (replaces Struct and Enum)
 else instance (
-    CircuitValue t
-  ) => CircuitValue (Zk t) where
-  toFields _ = forgetZk
+    CircuitValueRL list row
+  , RowToList row list
+  , NonEmpty list
+  ) => CircuitValue (ZStruct row) where
+  toFields _ = unsafeCoerce
 
-  sizeInFields _ = sizeInFields (Proxy :: Proxy t)
+  sizeInFields _ = sizeInFieldsL (Proxy :: Proxy list)
 
-  check = check <<< fromZk
+  -- NOTE: AsFields (ZStruct r) has the same runtime representation as `ZStruct r`
+  fromFields _ = unsafeCoerce
 
-  fromFields _ = map toZk <<< fromFields (Proxy :: Proxy t)
+-- ZEnum
+else instance (
+    RowToList row list
+  , CircuitValueEL list row
+  , NonEmpty list
+  ) => CircuitValue (ZEnum row) where
+  toFields _ = unsafeCoerce
+
+  sizeInFields _ = sizeInFieldsEL (Proxy :: Proxy list)
+
+  -- NOTE: AsFields (ZEnum r) has the same runtime representation as `ZEnum r`
+  fromFields _  =  unsafeCoerce
 -- Bare Fieldlike instance
 else instance FieldLike t => CircuitValue t where
-  toFields _ t = arrToFields [toField t]
+  toFields _ t = unsafeCoerce $ arrToFields [toField t]
 
   sizeInFields _ = intToSize 1
 
-  check = checkField
-
-  fromFields _ fields = case fieldsToArr fields of
-    [t] -> Just $ fromField t
-    anythingElse ->  Nothing
-
-
-{- CircuitEnum, for representing Sums/Variants/Enumerations -}
+  fromFields _  = fromField <<< unsafeHead <<<  forgetAsFields'
 
 -- Helpers (we can't avoid type math here)
 
@@ -216,7 +232,6 @@ else instance (
   , RowToList row (Cons l t rest)
   , PR.Cons l t rowRest row
   , IsSymbol l) => RowLen (Cons l t rest) row (Succ n)
-
 
 class Index :: Symbol -> RowList Type -> Row Type -> Nat -> Constraint
 class IsNat ix <= Index label list row ix | label list -> ix, list -> row
@@ -233,15 +248,11 @@ instance ( IsNat n
 -}
 class CircuitValueEL :: RowList Type -> Row Type -> Constraint
 class CircuitValueEL list row | list -> row  where
-  toFieldsEL :: Proxy list -> Variant row -> Fields
+  toFieldsEL :: Proxy list -> Variant row -> AsFields (Variant row)
 
   sizeInFieldsEL :: Proxy list -> SizeInFields
 
-  --toInputEL :: Proxy list -> Variant row -> HashInput
-
-  checkEL :: Proxy list -> Variant row -> Assertion
-
-  fromFieldsEL :: Proxy list -> Proxy row -> Fields -> Maybe (Variant row)
+  fromFieldsEL :: Proxy list -> Proxy row -> AsFields (Variant row) -> Variant row
 {- I'll forget this if I don't write it down
 
    The encoding we use for Variants is:
@@ -260,13 +271,11 @@ class CircuitValueEL list row | list -> row  where
 -- type class b/c we need a base case and it's a LOT more annoying if the base case is `Cons l t Nil`
 -- (I can't figure out how to make PS unify the r in `RowToList r Nil` or `ListToRow Nil r` with (), tho it'd work in Haskell)
 instance CircuitValueEL Nil () where
-  toFieldsEL _ _ = arrToFields []
+  toFieldsEL _ _ = unsafeCoerce $ arrToFields []
 
   sizeInFieldsEL _ = intToSize 0
 
-  checkEL _ = checkEmptyVar
-
-  fromFieldsEL _ _ fields = Nothing
+  fromFieldsEL _ _ fields = error "Error: Attempted to construct an empty Variant, which is impossible"
 else instance (
     CircuitValue t
   , PR.Lacks label rowRest
@@ -289,39 +298,36 @@ else instance (
           where
             len = length arr + 1 -- I think?
 
-        goThis :: t -> Fields
-        goThis t = arrToFields $ pad fieldsT
+        goThis :: t -> AsFields (Variant rowFull)
+        goThis t = unsafeCoerce $ arrToFields $ pad fieldsT
           where
             fieldsT :: Array Field
-            fieldsT = fieldsToArr $ toFields (Proxy :: Proxy t) t
+            fieldsT = forgetAsFields' $ toFields (Proxy :: Proxy t) t
 
-        --goRest :: Variant rowRest -> Fields
-        goRest rest = toFieldsEL (Proxy :: Proxy listRest) rest
+        goRest :: Variant rowRest -> AsFields (Variant rowFull)
+        goRest rest = unsafeCoerce $ toFieldsEL (Proxy :: Proxy listRest) rest
 
     sizeInFieldsEL list =  intToSize $ (max (sizeThis + 1) sizeRest) -- +1 for the Index prefix
       where
         sizeThis = sizeToInt $ sizeInFields (Proxy :: Proxy t)
         sizeRest = sizeToInt $ sizeInFieldsEL (Proxy :: Proxy listRest)
 
-    checkEL list var = on (Proxy :: Proxy label) goThis goRest var
+    fromFieldsEL list row fields' = unsafeIf sizeVar (ix #== field ix')
+         (inj label $ fromFields proxyT (unsafeCoerce (take sizeT rest) :: AsFields t))
+         (expand $ fromFieldsEL listRest rowRest (unsafeCoerce fields' :: AsFields (Variant rowRest)))
       where
-        goThis :: t -> Assertion
-        goThis = check
+        ix :: Field
+        ix = unsafeHead fields
 
-        --goRest :: Variant rowRest -> Assertion
-        goRest = checkEL (Proxy :: Proxy listRest)
+        rest = drop 1 fields
 
-    fromFieldsEL list row fields = case uncons (fieldsToArr fields) of
-       Just {head: ix, tail: rest} -> if toBigIntField ix == ix'
-         then inj label <$> fromFields proxyT (arrToFields $ take sizeT rest)
-         else expand <$> fromFieldsEL listRest rowRest fields
-       Nothing -> Nothing
-      where
+        fields = forgetAsFields' fields'
         label = Proxy :: Proxy label
         listRest = Proxy :: Proxy listRest
         rowRest = Proxy :: Proxy rowRest
         proxyT = Proxy :: Proxy t
         sizeT = sizeToInt $ sizeInFields proxyT
+        sizeVar = sizeInFieldsEL list
         ix' = BI.fromInt (reflectNat (Proxy :: Proxy ix))
 
 
@@ -339,7 +345,7 @@ arrToFields = unsafeCoerce
 fieldsToArr :: Fields -> Array Field
 fieldsToArr = unsafeCoerce
 
-{- Zk Utilities, should be in Field.purs but here for staging/module hierarchy reasons -}
+{- AsFields Utilities, should be in Field.purs but here for staging/module hierarchy reasons -}
 
 {- This is how we represent an `Array Field` which *we* know corresponds to a particular circuit type
 
@@ -349,64 +355,136 @@ fieldsToArr = unsafeCoerce
   Ideally this would be a Functor/Applicative/Monad, but it can't satisfy the laws. It could be a *constrained* monad,
   but afaict there isn't a nice library for those in PS and since we don't have RebindableSyntax it'd be ugly as hell.
 -}
-foreign import data Zk :: Type -> Type
+foreign import data AsFields :: Type -> Type
 
-forgetZk :: forall t. Zk t -> Fields
-forgetZk = unsafeCoerce
+forgetAsFields :: forall t. AsFields t -> Fields
+forgetAsFields = unsafeCoerce
 
-forgetZk' :: forall t. Zk t -> Array Field
-forgetZk' = unsafeCoerce
+forgetAsFields' :: forall t. AsFields t -> Array Field
+forgetAsFields' = unsafeCoerce
 
-withZk :: forall t r. Zk t -> (Fields -> r) -> r
-withZk zk f = f (forgetZk zk)
+asFields :: forall (t :: Type). CircuitValue t => t -> AsFields t
+asFields t = toFields (Proxy :: Proxy t) t
 
-asZk :: forall t r. CircuitValue t => t -> (Zk t -> r) -> r
-asZk t f = f (toZk t)
-
-unZk :: forall t r. CircuitValue t => Zk t -> (t -> r) -> r
-unZk zt f = f (fromZk zt)
-
-fromZk :: forall (t :: Type). CircuitValue t => Zk t -> t
-fromZk af = withZk af $ \arr -> unsafePartial fromJust (fromFields (Proxy :: Proxy t) arr)
-
-toZk :: forall (t :: Type). CircuitValue t => t -> Zk t
-toZk t = unsafeCoerce $ toFields (Proxy :: Proxy t) t
+unFields :: forall (@t :: Type). CircuitValue t => AsFields t -> t
+unFields = fromFields (Proxy :: Proxy t)
 
 -- type synonyms for convenience
 
-type ZkStruct :: Row Type -> Type
-type ZkStruct row = Zk (Record row)
+foreign import data ZStruct :: Row Type -> Type
 
-type ZkEnum :: Row Type -> Type
-type ZkEnum row = Zk (Variant row)
+forgetStruct :: forall (r :: Row Type). ZStruct r -> Array Field
+forgetStruct = unsafeCoerce
 
-instance (ZkEq t, CircuitValue t) => ZkEq (Zk t) where
-  zkEq z1 z2 = zkEq (fromZk z1) (fromZk z2)
-  zkAssertEq msg z1 z2 = zkAssertEq msg (fromZk z1) (fromZk z2)
+toStruct :: forall (r :: Row Type) (r' :: Row Type)
+         . CircuitValue (Record r)
+         => AsFieldsOf (Record r) (ZStruct r')
+         => Record r
+         -> ZStruct r'
+toStruct = unsafeCoerce <<< toFields (Proxy :: Proxy (Record r))
 
-instance (ZkOrd t, CircuitValue t) => ZkOrd (Zk t) where
-  zkLT b1 b2 =  (fromZk b1) #<  (fromZk b2)
-  assertLT msg b1 b2 = assertLT  msg (fromZk b1) (fromZk b2)
-  zkLTE b1 b2 =  (fromZk b1) #<=  (fromZk b2)
-  assertLTE msg b1 b2 = assertLTE msg (fromZk b1) (fromZk b2)
-  zkGT b1 b2 = (fromZk b1) #> (fromZk b2)
-  assertGT msg b1 b2 = assertGT msg (fromZk b1) (fromZk b2)
-  zkGTE b1 b2 = (fromZk b1) #>= (fromZk b2)
-  assertGTE msg b1 b2 = assertGTE msg (fromZk b1) (fromZk b2)
+-- | FOR INTERNAL USE ONLY
+fromStruct :: forall (r :: Row Type) (r' :: Row Type)
+           . CircuitValue (Record r)
+           => AsFieldsOf (Record r) (ZStruct r')
+           => ZStruct r'
+           -> Record r
+fromStruct  = unFields @(Record r) <<< f
+  where
+    f :: ZStruct r' -> AsFields (Record r)
+    f = unsafeCoerce
 
+foreign import data ZEnum :: Row Type -> Type
+
+forgetEnum :: forall (r :: Row Type). ZEnum r -> Array Field
+forgetEnum = unsafeCoerce
+
+toEnum :: forall (r :: Row Type) (r' :: Row Type)
+       . CircuitValue (Variant r)
+       => AsFieldsOf (Variant r) (ZEnum r')
+       => Variant r
+       -> ZEnum r'
+toEnum = unsafeCoerce <<< toFields (Proxy :: Proxy (Variant r))
+
+-- | FOR INTERNAL USE ONLY
+fromEnum :: forall (r :: Row Type) (r' :: Row Type)
+         . CircuitValue (Variant r)
+         => AsFieldsOf (Variant r) (ZEnum r')
+         => ZEnum r'
+         -> Variant r
+fromEnum = unFields @(Variant r) <<< f
+  where
+    f :: ZEnum r' -> AsFields (Variant r)
+    f = unsafeCoerce
+
+instance (ZkEq t, CircuitValue t) => ZkEq (AsFields t) where
+  zkEq z1 z2 = zkEq (unFields z1) (unFields z2)
+  zkAssertEq msg z1 z2 = zkAssertEq msg (unFields z1) (unFields z2)
+
+instance (ZkOrd t, CircuitValue t) => ZkOrd (AsFields t) where
+  zkLT b1 b2 =  (unFields b1) #<  (unFields b2)
+  assertLT msg b1 b2 = assertLT  msg (unFields b1) (unFields b2)
+  zkLTE b1 b2 =  (unFields b1) #<=  (unFields b2)
+  assertLTE msg b1 b2 = assertLTE msg (unFields b1) (unFields b2)
+  zkGT b1 b2 = (unFields b1) #> (unFields b2)
+  assertGT msg b1 b2 = assertGT msg (unFields b1) (unFields b2)
+  zkGTE b1 b2 = (unFields b1) #>= (unFields b2)
+  assertGTE msg b1 b2 = assertGTE msg (unFields b1) (unFields b2)
+
+-- helper class TODO: document what it's for
+
+-- don't need methods here, we're just going to unsafeCoerce in the arg class
+class AsFieldsOfL :: RowList Type -> Row Type -> RowList Type -> Row Type -> Constraint
+class AsFieldsOfL list row zList zRow | list -> row, zList -> zRow, list -> zList, row -> zRow
+
+instance AsFieldsOfL Nil () Nil ()
+else instance (
+    AsFieldsOfL lRest rRest zlRest zrRest
+  , AsFieldsOf a zA
+  , RowToList rRest lRest
+  , RowToList zrRest zlRest
+  , PR.Cons lbl a rRest rFull
+  , PR.Cons lbl zA zrRest zrFull
+  , IsSymbol lbl
+  ) => AsFieldsOfL (Cons lbl a lRest) rFull (Cons lbl zA zlRest) zrFull
+
+class AsFieldsOf :: Type -> Type -> Constraint
+class AsFieldsOf a za | a -> za, za -> a
+
+instance (
+    AsFieldsOfL list row zList zRow
+  , RowToList row list
+  , RowToList zRow zList
+  , CircuitValue (Record row)
+  ) => AsFieldsOf (Record row) (ZStruct zRow)
+else instance (
+    AsFieldsOfL list row zList zRow
+  , RowToList row list
+  , RowToList zRow zList
+  , CircuitValue (Variant row)
+  ) => AsFieldsOf (Variant row) (ZEnum zRow)
+else instance (
+    CircuitValue a
+  ) => AsFieldsOf a a -- maybe AsFieldsOf a (AsFields a)?
+
+coerceFromAsFields :: forall a' a. AsFieldsOf a a' => AsFields a' -> AsFields a
+coerceFromAsFields = unsafeCoerce
+
+coerceToAsFields :: forall a a'. AsFieldsOf a a' => AsFields a -> AsFields a'
+coerceToAsFields = unsafeCoerce
 
 -- convenience for instances
 
-zkBin :: forall t r. CircuitValue t => CircuitValue r => Zk t -> Zk t -> (t -> t -> r) -> Zk r
-zkBin z1 z2 f = toZk $ f (fromZk z1) (fromZk z2)
+zkBin :: forall t r. CircuitValue t => CircuitValue r => AsFields t -> AsFields t -> (t -> t -> r) -> AsFields r
+zkBin z1 z2 f = asFields $ f (unFields z1) (unFields z2)
 
-instance (Semiring t, CircuitValue t) => Semiring (Zk t) where
+instance (Semiring t, CircuitValue t) => Semiring (AsFields t) where
   add a b = zkBin a b add
-  zero    = toZk zero
+  zero    = asFields zero
   mul a b = zkBin a b mul
-  one     = toZk one
+  one     = asFields one
 
-instance (Ring t, CircuitValue t) => Ring (Zk t) where
+instance (Ring t, CircuitValue t) => Ring (AsFields t) where
   sub a b = zkBin a b sub
 
-instance (CommutativeRing t, CircuitValue t) => CommutativeRing (Zk t)
+instance (CommutativeRing t, CircuitValue t) => CommutativeRing (AsFields t)
