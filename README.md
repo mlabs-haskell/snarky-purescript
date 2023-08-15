@@ -6,7 +6,7 @@ If you're from zkIgnite, please note that this is a research project intended to
 
 ## How to use 
 
-Real documentation forthcoming. `Main.purs` contains an annotated example that acts as a basic tutorial, copied below:
+Real documentation forthcoming. For now, `Main.purs` contains an example that has been annotated below as a basic tutorial.
 
 
 ``` purescript
