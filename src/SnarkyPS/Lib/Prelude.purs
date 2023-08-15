@@ -20,7 +20,6 @@ module SnarkyPS.Lib.Prelude (
   , get
   , set
   , over
-  , input
   ) where
 
 
@@ -62,7 +61,7 @@ get :: forall @l t row list
     => CircuitValue t
     => ZStruct row
     -> ZkM t
-get = pure <<< get_ @l
+get = liftFields <<<  get_ @l
 
 set :: forall @l t row list
     . ZField l t list row
@@ -82,9 +81,3 @@ over :: forall @l t row list
      -> ZStruct row
      -> ZStruct row
 over = over_ @l
-
-input :: forall (t :: Type) (t' :: Type). CircuitValue t => AsFieldsOf t t' => t -> ZkM t'
-input t = unsafeCoerce t'
- where
-   t' :: ZkM t
-   t' = lift $ asFields t

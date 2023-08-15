@@ -38,7 +38,7 @@ foreign import log :: forall t. t -> Unit
 foreign import log_ :: forall t. t -> Unit
 
 zkIf :: forall a. CircuitValue a =>  Bool -> a -> a -> a
-zkIf b t f = fromAsFields res
+zkIf b t f = unFields res
   where
     a :: Proxy a
     a = Proxy

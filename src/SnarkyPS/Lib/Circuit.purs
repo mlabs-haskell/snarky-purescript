@@ -57,7 +57,7 @@ mkCircuit :: forall pub priv pub' priv'
 mkCircuit f = runFn3 mkCircuit_ (mkFn2 f') pubProvable privProvable
   where
     f' :: pub' -> priv' -> ZUnit
-    f' pub' priv' = fromAsFields $ unZkM (f pub' priv') $ \_ -> asFields zUnit
+    f' pub' priv' = unFields $ unZkM (f pub' priv') $ \_ -> asFields zUnit
     privProvable =  provable @priv
     pubProvable  =  provable @pub
 

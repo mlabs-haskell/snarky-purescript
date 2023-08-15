@@ -53,7 +53,7 @@ emptyHash :: Hash
 emptyHash = fieldToHash (field 0)
 
 hashCV :: forall t. CircuitValue t => t -> Hash
-hashCV = hashFields' <<< toFields (Proxy :: Proxy t)
+hashCV = hashFields' <<< forgetAsFields <<< toFields (Proxy :: Proxy t)
 
 foreign import unsafeHead :: forall (t :: Type). Array t -> t
 
@@ -157,21 +157,6 @@ instance (
                        (Proxy :: Proxy zList)
                        (r)
                        (unsafeCoerce e :: ZEnum zRow)
-{-
-instance (
-      ZkFromData Record Struct r zR
-    , ToFields (Record r)
-    , Sized res
-    , CircuitValue res
-    ) => Matchable (Struct zR) (Array (Match (Record r) res)) res where
-  runMatch def rFields arr = case uncons arr of
-    Nothing -> def
-    Just {head: Match r' res, tail: t} ->
-      zkIf (hashFields rFields #== hashCV r')
-        (res)
-        (runMatch def rFields t)
--}
-
 
 instance CircuitValue r => Matchable Bool (Array (Match Boolean r)) r where
   runMatch res bFields arr = case uncons arr of

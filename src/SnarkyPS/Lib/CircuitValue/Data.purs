@@ -16,10 +16,8 @@ module SnarkyPS.Lib.CircuitValue.Data (
 
   -- Monad
   , ZkM (ZkM)
-  , lift
-  , lower
-  , lowerCV
   , unZkM
+  , liftFields
   ) where
 
 import Prelude hiding (Void)
@@ -99,7 +97,7 @@ getIndex = Tuple l r
 {- Solely to avoid constraint noise & reduce the need for type applications & proxies -}
 class ZField :: Symbol -> Type -> RowList Type -> Row Type  -> Constraint
 class ZField label t list row | list -> row, label list -> t where
-  getField :: Proxy label -> Proxy list -> Proxy row -> ZStruct row -> t
+  getField :: Proxy label -> Proxy list -> Proxy row -> ZStruct row -> AsFields t
 
   setField :: Proxy label -> Proxy list -> Proxy row -> t -> ZStruct row -> ZStruct row
 
@@ -111,23 +109,24 @@ instance ( CircuitValue t
          , Locate list row label
          , PR.Cons label t rowRest row -- Note: Need this for the compiler to infer the type of `t` (tho you'd think the fundep in GetField would suffice?)
          ) => ZField label t list row where
-  getField label list row = unsafeFromFields @t <<< slice l r <<< forgetStruct
+  getField label list row = unsafeCoerce  <<< slice l r <<< forgetStruct
     where
       Tuple l r = getIndex @label @list
 
   setField label list row t struct =
-    -- WARNING/FIXME: High probability of an off-by-one error, double check this when it compiles enough for a repl
     let structArray = forgetStruct struct
 
         Tuple l r = getIndex @label @list
 
-        tFields = fieldsToArr $ toFields (Proxy :: Proxy t) t
+        tFields = forgetAsFields' $ toFields (Proxy :: Proxy t) t
 
         before = slice 0 l structArray
 
         after = slice r (length structArray) structArray
 
-    in unsafeFromFields @(ZStruct row) $ before <> tFields <> after
+        res = before <> tFields <> after
+
+    in unsafeCoerce res :: ZStruct row
 
 
 {- The interface for Prelude should be monadic, so these generally shouldn't be used directly -}
@@ -135,7 +134,7 @@ get_ :: forall @label t row list
     . RowToList row list
     => ZField label t list row
     => ZStruct row
-    -> t
+    -> AsFields t
 get_ = getField (Proxy :: Proxy label) (Proxy :: Proxy list) (Proxy :: Proxy row)
 
 set_ :: forall @label t row list
@@ -157,7 +156,7 @@ over_ :: forall @label t row list
       => (t -> t)
       -> ZStruct row
       -> ZStruct row
-over_ f struct = set_ @label (f $ get_ @label struct) struct
+over_ f struct = set_ @label (f <<< unFields $ get_ @label struct) struct
 
 {- Create a Variant -}
 inj :: forall @sym a r1 r2. PR.Cons sym a r1 r2 => IsSymbol sym => a -> V.Variant r2
@@ -202,11 +201,5 @@ instance Monad ZkM
 runZkM :: forall a. ZkM (AsFields a) -> AsFields a
 runZkM zk = unZkM zk identity
 
-lift :: forall (a :: Type). CircuitValue a => AsFields a -> ZkM a
-lift = pure <<< fromAsFields
-
-lower :: forall (a :: Type). CircuitValue a => ZkM a -> AsFields a
-lower zk = unZkM zk asFields
-
-lowerCV :: forall (a :: Type). CircuitValue a => ZkM a -> a
-lowerCV zk = fromAsFields $ unZkM zk asFields
+liftFields :: forall (a :: Type). CircuitValue a => AsFields a -> ZkM a
+liftFields = pure <<< unFields
