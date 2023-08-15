@@ -44,6 +44,10 @@ import SnarkyPS.Lib.FieldClasses
 
 import Debug
 
+foreign import unsafeIf :: forall (a :: Type). SizeInFields -> Bool -> a -> a -> a
+
+foreign import unsafeHead :: forall (a :: Type). Array a -> a
+
 {- NOTE: *** IMPORTANT ***
 
   ZStruct and ZEnum really should not have CircuitValue instances! Rearrange typeclasses to fix that
@@ -59,7 +63,6 @@ traceMsg msg toTrace b = trace (msg <> "\n")
                          $ \_ -> trace "\n"
                          $ \_ -> b
 
-
 {- Foreign imports -}
 
 foreign import checkEmptyRec :: forall (row :: Row Type). Record row -> Assertion
@@ -73,7 +76,6 @@ instance NonEmpty (Cons l t res)
 else instance (
   Fail (Text "Circuit Enums & Structs must not be empty!")
  ) => NonEmpty Nil
-
 
 {-
 
@@ -99,22 +101,19 @@ class CircuitValueRL list row | list -> row where
 
   sizeInFieldsL :: Proxy list -> SizeInFields
 
-  -- This should be
-  -- Proxy list -> Proxy row -> Record row -> AsFields (Record row) -> Record row
-  -- Same for toFieldsL & all the other classes -__
-  -- B/c we don't use these to construct a SnarkyJS `Provable` anymore,
-  -- the class logic is messed up and can be fixed by making that change.
-  -- & then we can get rid of the stupid toZk/fromZk/etc functions that are super annoying
-  fromFieldsL :: Proxy list -> Proxy row -> AsFields (Record row) -> Maybe (Record row)
+  {- NOTE:
+      This (and all of the other fromFields methods) are safe IF AND ONLY IF
+      they're applied to an `AsFields t` that was originally constructed from
+      a `t` that has a CircuitValue instance.
+  -}
+  fromFieldsL :: Proxy list -> Proxy row -> AsFields (Record row) -> Record row
 
 instance CircuitValueRL Nil () where
   toFieldsL _ _ = unsafeCoerce $ arrToFields []
 
   sizeInFieldsL _ = intToSize 0
 
-  fromFieldsL _ _ fields = case forgetAsFields' fields of
-    [] -> Just {}
-    anythingElse -> Nothing
+  fromFieldsL _ _ fields = {}
 
 else instance (
     CircuitValue t
@@ -144,23 +143,21 @@ else instance (
         sizeRest =  sizeToInt $ sizeInFieldsL (Proxy :: Proxy listRest)
     in intToSize (sizeT + sizeRest)
 
-  fromFieldsL _ _ fields' = case length arr >= sizeT of
-    true -> case fromFieldsRest of
-      Nothing -> Nothing
-      Just recRest -> case fromFields proxyT (unsafeCoerce (take sizeT arr) :: AsFields t) of
-       Nothing -> Nothing
-       Just t  ->  Just $ insert label t recRest
-    false -> Nothing
+  fromFieldsL _ _ fields' = insert label t recRest
    where
-     fields = forgetAsFields fields'
-     label  = Proxy :: Proxy label
-     proxyT = Proxy :: Proxy t
-     listRest = Proxy :: Proxy listRest
-     rowRest  = Proxy :: Proxy rowRest
-     arr   = fieldsToArr fields
+     arr   = forgetAsFields' fields'
      sizeT = sizeToInt $ sizeInFields proxyT
-     fromFieldsRest :: Maybe (Record rowRest)
-     fromFieldsRest = fromFieldsL listRest rowRest (unsafeCoerce (drop sizeT arr) :: AsFields (Record rowRest))
+     proxyT = Proxy :: Proxy t
+     label = Proxy :: Proxy label
+
+     t :: t
+     t = fromFields proxyT (unsafeCoerce (take sizeT arr) :: AsFields t)
+
+     recRest ::  Record rowRest
+     recRest = fromFieldsL listRest rowRest (unsafeCoerce (drop sizeT arr) :: AsFields (Record rowRest))
+       where
+         listRest = Proxy :: Proxy listRest
+         rowRest  = Proxy :: Proxy rowRest
 
 class CircuitValue :: Type -> Constraint
 class CircuitValue t where
@@ -168,7 +165,7 @@ class CircuitValue t where
 
   toFields :: Proxy t -> t -> AsFields t
 
-  fromFields :: Proxy t -> AsFields t -> Maybe t
+  fromFields :: Proxy t -> AsFields t -> t
 
 -- ZStruct
 instance (
@@ -202,7 +199,7 @@ else instance (
   sizeInFields _ = sizeInFieldsL (Proxy :: Proxy list)
 
   -- NOTE: AsFields (ZStruct r) has the same runtime representation as `ZStruct r`
-  fromFields _ = Just <<< unsafeCoerce
+  fromFields _ = unsafeCoerce
 
 -- ZEnum
 else instance (
@@ -215,19 +212,14 @@ else instance (
   sizeInFields _ = sizeInFieldsEL (Proxy :: Proxy list)
 
   -- NOTE: AsFields (ZEnum r) has the same runtime representation as `ZEnum r`
-  fromFields _  = Just <<< unsafeCoerce
+  fromFields _  =  unsafeCoerce
 -- Bare Fieldlike instance
 else instance FieldLike t => CircuitValue t where
   toFields _ t = unsafeCoerce $ arrToFields [toField t]
 
   sizeInFields _ = intToSize 1
 
-  fromFields _ fields = case forgetAsFields' fields of
-    [t] -> Just $ fromField t
-    anythingElse ->  Nothing
-
-
-{- CircuitEnum, for representing Sums/Variants/Enumerations -}
+  fromFields _  = fromField <<< unsafeHead <<<  forgetAsFields'
 
 -- Helpers (we can't avoid type math here)
 
@@ -260,7 +252,7 @@ class CircuitValueEL list row | list -> row  where
 
   sizeInFieldsEL :: Proxy list -> SizeInFields
 
-  fromFieldsEL :: Proxy list -> Proxy row -> AsFields (Variant row) -> Maybe (Variant row)
+  fromFieldsEL :: Proxy list -> Proxy row -> AsFields (Variant row) -> Variant row
 {- I'll forget this if I don't write it down
 
    The encoding we use for Variants is:
@@ -283,7 +275,7 @@ instance CircuitValueEL Nil () where
 
   sizeInFieldsEL _ = intToSize 0
 
-  fromFieldsEL _ _ fields = Nothing
+  fromFieldsEL _ _ fields = error "Error: Attempted to construct an empty Variant, which is impossible"
 else instance (
     CircuitValue t
   , PR.Lacks label rowRest
@@ -320,18 +312,22 @@ else instance (
         sizeThis = sizeToInt $ sizeInFields (Proxy :: Proxy t)
         sizeRest = sizeToInt $ sizeInFieldsEL (Proxy :: Proxy listRest)
 
-    fromFieldsEL list row fields' = case uncons fields of
-       Just {head: ix, tail: rest} -> if toBigIntField ix == ix'
-         then inj label <$> fromFields proxyT (unsafeCoerce (take sizeT rest) :: AsFields t)
-         else expand <$> fromFieldsEL listRest rowRest (unsafeCoerce fields' :: AsFields (Variant rowRest))
-       Nothing -> Nothing
+    fromFieldsEL list row fields' = unsafeIf sizeVar (ix #== field ix')
+         (inj label $ fromFields proxyT (unsafeCoerce (take sizeT rest) :: AsFields t))
+         (expand $ fromFieldsEL listRest rowRest (unsafeCoerce fields' :: AsFields (Variant rowRest)))
       where
+        ix :: Field
+        ix = unsafeHead fields
+
+        rest = drop 1 fields
+
         fields = forgetAsFields' fields'
         label = Proxy :: Proxy label
         listRest = Proxy :: Proxy listRest
         rowRest = Proxy :: Proxy rowRest
         proxyT = Proxy :: Proxy t
         sizeT = sizeToInt $ sizeInFields proxyT
+        sizeVar = sizeInFieldsEL list
         ix' = BI.fromInt (reflectNat (Proxy :: Proxy ix))
 
 
@@ -371,7 +367,7 @@ asFields :: forall (t :: Type). CircuitValue t => t -> AsFields t
 asFields t = toFields (Proxy :: Proxy t) t
 
 unFields :: forall (@t :: Type). CircuitValue t => AsFields t -> t
-unFields = unsafePartial fromJust <<<  fromFields (Proxy :: Proxy t)
+unFields = fromFields (Proxy :: Proxy t)
 
 -- type synonyms for convenience
 
@@ -476,7 +472,6 @@ coerceFromAsFields = unsafeCoerce
 
 coerceToAsFields :: forall a a'. AsFieldsOf a a' => AsFields a -> AsFields a'
 coerceToAsFields = unsafeCoerce
-
 
 -- convenience for instances
 

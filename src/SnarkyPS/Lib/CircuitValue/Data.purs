@@ -165,19 +165,13 @@ inj = V.inj (Proxy :: Proxy sym)
 inj_ :: forall @sym r1 r2. PR.Cons sym ZUnit r1 r2 => IsSymbol sym => V.Variant r2
 inj_ = V.inj (Proxy :: Proxy sym) zUnit
 
-
-{- The Monad for representing circuit computations
-
-   TODO: Move to its own module
-
--}
-
-
 {-
    A Codensity Monad where the `f` is specialized to `Zk`
 
    Because `Codensity f` is a Monad for *any* f, we can use this to
    implement something quite like a "Constrained Monad".
+
+   TODO: Move to its own module
 -}
 newtype ZkM a = ZkM (forall b. (a -> AsFields b) -> AsFields b)
 

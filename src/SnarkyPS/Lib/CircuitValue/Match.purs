@@ -55,7 +55,7 @@ emptyHash = fieldToHash (field 0)
 hashCV :: forall t. CircuitValue t => t -> Hash
 hashCV = hashFields' <<< forgetAsFields <<< toFields (Proxy :: Proxy t)
 
-foreign import unsafeHead :: forall (t :: Type). Array t -> t
+-- foreign import unsafeHead :: forall (t :: Type). Array t -> t
 
 {- Class for matching on ZkEnums. TODO: Explain how it works -}
 

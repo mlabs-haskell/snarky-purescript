@@ -1,14 +1,10 @@
 module Main where
 
-import Prelude hiding (Void)
-
+import Prelude
 import Effect (Effect)
-import Effect.Class
-import Effect.Aff
+import Effect.Class (liftEffect)
+import Effect.Aff (launchAff_)
 import Effect.Console (log)
-import Type.Proxy
-import Prim.Row as PR
-import Type.Data.Symbol
 
 import Data.Foldable (foldM)
 
@@ -113,7 +109,7 @@ gameCircuit = mkCircuit $ \moves board -> do
 
       {- assertM :: ZkM Assertion -> ZkM Unit
 
-        If you're a functional programmer, `assertM` is just an alias for `Control.Monad.Void`
+        If you're a functional programmer, `assertM` is just an alias for `Control.Monad.void`
       -}
       assertM $ checkPos "bad start" startPos
 
