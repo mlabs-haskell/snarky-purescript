@@ -108,9 +108,10 @@ type Moves = { move1 :: Option Move
     - Write a function `pubF -> privF -> ZkM Unit` in the ZkM monad and apply `mkCircuit` 
       to that function
 
-    - Note that pubF and privF are the `AsFieldsOf` representations of the PureScript types
-      annotated in for the circuit and can be determined in accordance with the above procedure
-      (though type inference should be strong enough that you never have to annotate them).
+    - Note that pubF and privF are the `AsFieldsOf` representations of  
+      vanilla PureScript types and can be determined in accordance with the above 
+      definition  (though type inference should be strong enough that 
+      you're never required to annotate them).
 
       See the comments below for concrete examples of the `AsFieldsOf` 
       representation for input types
