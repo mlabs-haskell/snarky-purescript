@@ -49,7 +49,7 @@ import SnarkyPS.Lib.Prelude
   Once we have a `Circuit pub priv`, we can (attempt to) generate a proof by
   applying public and private inputs using the `prove` function. You can think of
   the type of prove as:
-    `prove :: Circuit pub priv -> pub -> Priv -> Aff (Prove pub priv)`
+    `prove :: forall pub priv. Circuit pub priv -> pub -> priv -> Aff (Prove pub priv)`
 
   The "magic" that powers the DSL consists in the argument to the `mkCircuit`
   function, which has the full type:
