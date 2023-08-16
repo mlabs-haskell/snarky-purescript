@@ -8,6 +8,8 @@ If you're from zkIgnite, please note that this is a research project intended to
 
 Real documentation forthcoming. For now, `Main.purs` contains an example that has been annotated below as a basic tutorial.
 
+**NOTE**: The below tutorial assumes some familiarity with functional programming, and goes into more detail than is necessary to *use* the DSL. Enormous effort has been expended to ensure that typical users never need to think about the scary under-the-hood type level programming that makes this work.
+
 
 ``` purescript
 module Main where
