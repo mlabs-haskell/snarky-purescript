@@ -1,4 +1,38 @@
-module SnarkyPS.Lib.Field  where
+module SnarkyPS.Lib.Field (
+  -- Core exports
+    Field
+  , Fields
+  , SizeInFields
+  , class MakeField
+  , field
+
+  -- for instances that can't go here
+  , eqField
+  , assertEqField
+  , ltField
+  , assertLtField
+  , lteField
+  , assertLteField
+  , gtField
+  , assertGtField
+  , gteField
+  , assertGteField
+  -- TODO: Eliminate?
+  , checkField_
+  -- Unsafe!
+  , unsafeShowField
+
+  -- Bool stuff
+  , Bool
+  , fromBoolean
+  , toBoolean
+
+  -- Needed for U64 instances
+  , DivModResult
+
+  -- Misc
+  , error
+  )  where
 
 import Prelude hiding (Void)
 
@@ -13,8 +47,6 @@ import SnarkyPS.Lib.Context
 import Unsafe.Coerce (unsafeCoerce)
 
 foreign import data Field :: Type
-
-
 
 
 {- We have to define the primitive FieldLikes here to avoid circular dependencies
@@ -32,13 +64,6 @@ foreign import unsafeShowField :: Field -> String
 
 type DivModResult n = {quotient :: n, rest :: n}
 
-{- This is an opaque type in order to prevent users from doing anything
-   with the results of ToJSON/FromJSON from inside a snarky context
-
-   Inner should probably be the Json type from Aeson
-   TODO: Not implemented yet
--}
-foreign import data JSON :: Type
 
 {- Another opaque type to prevent users from doing anything with the results of
    sizeInFields in a snarky context. The unsafe functions that convert to/from numbers
@@ -56,13 +81,9 @@ foreign import data SizeInFields :: Type
 -}
 foreign import data Fields :: Type
 
-
 {-
   Field functions
 -}
-
--- NOTE: I don't think we actually need this?
-foreign import data ConstantField :: Type
 
 -- DO NOT EXPORT!!!! For instances only
 foreign import coerceToField :: forall t. t -> Field
@@ -74,15 +95,6 @@ foreign import addField :: Field -> Field -> Field
 foreign import mulField :: Field -> Field -> Field
 
 foreign import subField :: Field -> Field -> Field
-
-{- These *shouldn't* be necessary
-
-foreign import toBigIntField :: Field -> BigInt
-
-foreign import isConstantField :: Field -> Boolean
-
-foreign import toConstantField :: Field -> ConstantField
--}
 
 foreign import toBigIntField :: Field -> BigInt
 
@@ -100,12 +112,6 @@ foreign import squareField :: Field -> Field
 
 foreign import isZeroField :: Field ->  Bool
 
-foreign import toInputField :: Field -> HashInput
-
-foreign import toJSONField :: Field -> JSON
-
-foreign import fromJSONField :: JSON ->  Field -- Partial / bad, need to fix things in the JS
-
 foreign import divModField :: Field -> Field -> DivModResult Field
 
 foreign import divField :: Field -> Field -> Field
@@ -120,8 +126,6 @@ foreign import lteField :: Field -> Field -> Bool
 
 foreign import gteField :: Field -> Field -> Bool
 
--- The various 'assertX' & `check`` functions return void in JS, not a bool.
-
 foreign import assertEqField :: String -> Field -> Field -> Assertion
 
 foreign import assertLtField :: String -> Field -> Field -> Assertion
@@ -133,11 +137,10 @@ foreign import assertGtField :: String -> Field -> Field -> Assertion
 foreign import assertGteField :: String -> Field -> Field -> Assertion
 
 foreign import checkField_ :: Field -> Assertion
+
 {-
   Bool Functions (for instances)
-
 -}
-
 foreign import notBool :: Bool -> Bool
 
 foreign import andBool :: Bool -> Bool -> Bool
@@ -148,7 +151,7 @@ foreign import fromBoolean :: Boolean -> Bool
 
 foreign import toBoolean :: Bool -> Boolean
 
-{- Bool HeytingAlgebra Instance (so we can use && || etc directly -}
+{- Bool HeytingAlgebra Instance (so we can use && || etc directly) -}
 
 instance HeytingAlgebra Bool where
   ff = fromBoolean false

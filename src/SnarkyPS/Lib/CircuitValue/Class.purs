@@ -2,7 +2,56 @@
 
 -}
 
-module SnarkyPS.Lib.CircuitValue.Class where
+module SnarkyPS.Lib.CircuitValue.Class (
+  -- CircuitValue-able Records
+    class CircuitValueRL
+  , toFieldsL
+  , sizeInFieldsL
+  , fromFieldsL
+
+  -- CircuitValue-able Variants
+  , class CircuitValueEL
+  , toFieldsEL
+  , sizeInFieldsEL
+  , fromFieldsEL
+
+  -- CircuitValue
+  , class CircuitValue
+  , toFields
+  , sizeInFields
+  , fromFields
+
+  -- Utility classes (no methods)
+  , class NonEmpty
+  , class RowLen
+  , class Index
+
+  -- AsFields & Co
+  , AsFields
+  , class AsFieldsOfL
+  , class AsFieldsOf
+  , asFields
+  , forgetAsFields
+  , forgetAsFields'
+  , unFields
+
+  -- ZStruct
+  , ZStruct
+  , forgetStruct
+  , toStruct
+  , fromStruct
+
+  -- ZEnum
+  , ZEnum
+  , forgetEnum
+  , toEnum
+  , fromEnum
+
+  -- Misc - Ideally these should be removed
+  , sizeToInt
+  , intToSize
+  , unsafeHead
+  ) where
 
 import Prelude hiding (Void)
 
@@ -44,18 +93,10 @@ import SnarkyPS.Lib.FieldClasses
 
 import Debug
 
+-- for staging reasons and only used in this module
 foreign import unsafeIf :: forall (a :: Type). SizeInFields -> Bool -> a -> a -> a
 
 foreign import unsafeHead :: forall (a :: Type). Array a -> a
-
-{- NOTE: *** IMPORTANT ***
-
-  ZStruct and ZEnum really should not have CircuitValue instances! Rearrange typeclasses to fix that
-
-
--}
-
-{- Debug utils -}
 
 traceMsg :: forall a b. DebugWarning => String -> a -> b -> b
 traceMsg msg toTrace b = trace (msg <> "\n")
@@ -78,22 +119,11 @@ else instance (
  ) => NonEmpty Nil
 
 {-
-
-The core of this module consists in the CircuitValueRL and CircuitValue typeclasses.
-
-CircuitValueRL is a constraint over rows, and tells us that a record parameterized by the row
-can be constructed from elements that are transformable into [Field].
-
-CircuitValue is a constraint over *types*. Instances of CircuitValue can be represented by
-[Field] as well, and are suitable for proving.
-
-These classes are mutually recursive (indeed they have to be).
-
-This could be implemented with TypeLevel Nats, which would save us from needing
-the auxilliary `Offset` type class - but I did something similar in CTL and
-typelevel math DRAMATICALLY slows down compilation (i.e. it adds MINUTES for
-not-all-that-complex types)
-
+| A class for `RowList`s and `Rows` of `Records` which can be
+| converted to and from an `Array Field` that has a statically
+| known size.
+|
+| Internal.
 -}
 class CircuitValueRL :: RowList Type -> Row Type -> Constraint
 class CircuitValueRL list row | list -> row where
@@ -159,6 +189,13 @@ else instance (
          listRest = Proxy :: Proxy listRest
          rowRest  = Proxy :: Proxy rowRest
 
+{-
+| A class for types that can be converted to and from an `Array Field`
+| that has a statically known size.
+|
+| Internal.
+-}
+
 class CircuitValue :: Type -> Constraint
 class CircuitValue t where
   sizeInFields :: Proxy t -> SizeInFields
@@ -221,8 +258,6 @@ else instance FieldLike t => CircuitValue t where
 
   fromFields _  = fromField <<< unsafeHead <<<  forgetAsFields'
 
--- Helpers (we can't avoid type math here)
-
 class RowLen :: RowList Type -> Row Type -> Nat -> Constraint
 class IsNat len <= RowLen list row len | list -> len, list -> row
 
@@ -244,7 +279,11 @@ instance ( IsNat n
          ) => Index l (Cons l t rest) row (Succ n)
 
 {-
-     Enums
+| A class for `Rows Type`s where that a `Variant`
+| parameterized by such a row can be converted to and
+| from an `Array Fields` that has a statically known size.
+|
+| Internal.
 -}
 class CircuitValueEL :: RowList Type -> Row Type -> Constraint
 class CircuitValueEL list row | list -> row  where
@@ -291,7 +330,7 @@ else instance (
       where
         ix = reflectNat (Proxy :: Proxy ix)
 
-        maxSize = sizeToInt $ sizeInFieldsEL (Proxy :: Proxy listRest) -- This should INCLUDE the constr index prefix
+        maxSize = sizeToInt $ sizeInFieldsEL (Proxy :: Proxy listRest)
 
         pad :: Array Field -> Array Field
         pad arr =  field ix : (arr <> replicate (maxSize - len) (field 0))
@@ -369,8 +408,17 @@ asFields t = toFields (Proxy :: Proxy t) t
 unFields :: forall (@t :: Type). CircuitValue t => AsFields t -> t
 unFields = fromFields (Proxy :: Proxy t)
 
--- type synonyms for convenience
 
+{-
+| An in-circuit type, paramaterized by a row. Has the same
+| underlying representation as `AsFields (Record row)` for the
+| corresponding row.
+|
+| Instead of this, we could have done `AsFields (Record row)`,
+| however that requires users to provide type annotations and
+| class constraints when writing functions in the DSL,
+| which is to be avoided.
+-}
 foreign import data ZStruct :: Row Type -> Type
 
 forgetStruct :: forall (r :: Row Type). ZStruct r -> Array Field
@@ -394,6 +442,16 @@ fromStruct  = unFields @(Record r) <<< f
     f :: ZStruct r' -> AsFields (Record r)
     f = unsafeCoerce
 
+{-
+| An in-circuit type, paramaterized by a row. Has the same
+| underlying representation as `AsFields (Variant row)` for the
+| corresponding row.
+|
+| Instead of this, we could have done `AsFields (Variant row)`,
+| however that requires users provide type annotations and
+| class constraints when writing functions in the DSL,
+| which is to be avoided.
+-}
 foreign import data ZEnum :: Row Type -> Type
 
 forgetEnum :: forall (r :: Row Type). ZEnum r -> Array Field
@@ -433,7 +491,7 @@ instance (ZkOrd t, CircuitValue t) => ZkOrd (AsFields t) where
 
 -- helper class TODO: document what it's for
 
--- don't need methods here, we're just going to unsafeCoerce in the arg class
+-- TODO: Document this (it's not simple to explain the point)
 class AsFieldsOfL :: RowList Type -> Row Type -> RowList Type -> Row Type -> Constraint
 class AsFieldsOfL list row zList zRow | list -> row, zList -> zRow, list -> zList, row -> zRow
 

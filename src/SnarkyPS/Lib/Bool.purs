@@ -1,11 +1,14 @@
-module SnarkyPS.Lib.Bool where
+module SnarkyPS.Lib.Bool (
+    assertTrue
+  , equalsBool
+  , assertEqBool
+  , toFieldBool
+  , fromFieldBool
+  , checkBool
+  ) where
 
-import Prelude hiding (Void)
-import Data.Boolean
-import Data.Function.Uncurried
-
-import SnarkyPS.Lib.Field
-import SnarkyPS.Lib.Context
+import SnarkyPS.Lib.Field (Field, Bool, SizeInFields)
+import SnarkyPS.Lib.Context (Assertion)
 {-
   Bool functions
 -}

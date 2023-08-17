@@ -6,7 +6,7 @@ import Effect.Class (liftEffect)
 import Effect.Aff (launchAff_)
 import Effect.Console (log)
 
-import Data.Foldable (foldM)
+import Data.Foldable (foldl)
 
 import SnarkyPS.Lib.Prelude
 
@@ -33,7 +33,7 @@ type Position = {x :: U64, y :: U64}
 
 type Board = {start :: Position, goal :: Position}
 
-type Move = Variant (up :: ZUnit, down :: ZUnit, left :: ZUnit, right :: ZUnit)
+type Move = Variant (up :: U64, down :: ZUnit, left :: ZUnit, right :: ZUnit)
 
 type Moves = { move1 :: Option Move
              , move2 :: Option Move
@@ -55,7 +55,7 @@ gameCircuit = mkCircuit $ \moves board -> do
       move3 <- get @"move3" moves
       move4 <- get @"move4" moves
 
-      endPos <- foldM runMove startPos [move1,move2,move3,move4]
+      let endPos = foldl runMove startPos [move1,move2,move3,move4]
 
       assertM $ checkOutcome goal endPos
      where
@@ -74,13 +74,13 @@ gameCircuit = mkCircuit $ \moves board -> do
 
         pure $ assertTrue "player loses" (gX #== eX && gY #== eY)
 
-      runMove start mabMove = pure $ caseOn start mabMove {
-                none: zUnit ==>  start,
-                some: {
-                   up: zUnit ==> over @"y" minusOne start,
-                   down: zUnit ==> over @"y" plusOne start,
-                   left: zUnit ==> over @"x" minusOne start,
-                   right: zUnit ==> over @"x" plusOne start
+      runMove start mabMove = caseOn mabMove {
+                none: \_ -> start,
+                some: switch {
+                   up: \upVal -> over @"y" (\x -> x - upVal) start,
+                   down: \_ -> over @"y" plusOne start,
+                   left: \_ -> over @"x" minusOne start,
+                   right: \_ -> over @"x" plusOne start
                   }
                 }
         where
@@ -96,7 +96,7 @@ testMoves = {move1: inj @"some" up , move2: nullMove, move3: nullMove, move4: nu
     nullMove :: Option Move
     nullMove = inj_ @"none"
     up :: Move
-    up = inj_ @"up"
+    up = inj @"up" (u64 1)
 
 main :: Effect Unit
 main =  launchAff_  do

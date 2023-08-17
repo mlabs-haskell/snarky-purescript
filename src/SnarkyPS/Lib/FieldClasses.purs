@@ -1,4 +1,39 @@
-module SnarkyPS.Lib.FieldClasses where
+module SnarkyPS.Lib.FieldClasses (
+  -- FieldLike
+    class FieldLike
+  , toField
+  , fromField
+  , checkField
+
+  -- Coercion Helpers
+  , class CoerceBool
+  , bool
+
+  -- ZkEq
+  , class ZkEq
+  , zkEq
+  , zkAssertEq
+  , (#==)
+
+  -- ZkOrd
+  , class ZkOrd
+  , zkLT
+  , assertLT
+  , zkLTE
+  , assertLTE
+  , zkGT
+  , assertGT
+  , zkGTE
+  , assertGTE
+  , (#<)
+  , (#<=)
+  , (#>)
+  , (#>=)
+
+  -- ZUnit
+  , ZUnit
+  , zUnit
+  ) where
 
 import Prelude (identity, (<<<), ($))
 import Data.HeytingAlgebra
@@ -14,24 +49,38 @@ import Partial.Unsafe
 import Unsafe.Coerce
 import Data.Maybe
 
-{- Class of FieldLike types. The keystone of this whole embedding.
-
-   This class should *not* be directly exposed to users. We need the `fromField` method
-   to implement `fromFields` for the CircuitValue class, but in general there is no
-   reason for a user to need such a function, which looks like it can be used to escape the
-   snarky context.
--}
-
 hashToField :: Hash -> Field
 hashToField = unsafeCoerce
 
 fieldToHash :: Field -> Hash
 fieldToHash = unsafeCoerce
 
+{-
+| A Class for `CircuitValue`s which
+| have an underlying representation
+| of a single `Field`
+|
+| Users should never need to use this directly.
+-}
 class FieldLike :: Type -> Constraint
 class (ZkEq t, ZkOrd t) <= FieldLike t  where
+  {- Coerce a `FieldLike` to a `Field`
+  |
+  | Not that this is *not* how you should ordinarily
+  | convert vanilla PureScript types to their `CircuitValue`
+  | analogues. Use the methods in `SnarkyPS.Lib.CircuitValue.Class`
+  | if you want to do that.
+  -}
   toField :: t -> Field
+  {-
+  | Coerce a Field into a FieldLike value.
+  |
+  | This should not be used directly by users, as it is
+  | partial and unsafe, but is needed for internal purposes
+  | (where it can be used safely).
+  -}
   fromField :: Field -> t -- partial
+
   checkField :: t -> Assertion
 
 instance FieldLike Field where
@@ -49,11 +98,13 @@ instance FieldLike Hash where
   fromField = fieldToHash
   checkField h = checkField (toField h)
 
-fieldLikeToInput :: forall (t :: Type). FieldLike t => t -> HashInput
-fieldLikeToInput = toInputField <<< toField
-
-{- Convenience class for coercing PS values to FieldLike values -}
+{- | Convenience class for coercing to `Bool` -}
 class CoerceBool (t :: Type) where
+  {-
+  | Convert a `Bolean` into a `Bool`
+  |
+  | This is the ordinary way to construct `Bool` values from PureScript `Boolean`s
+  -}
   bool :: t -> Bool
 
 instance CoerceBool Boolean where
@@ -62,10 +113,10 @@ instance CoerceBool Boolean where
 instance CoerceBool Bool where
   bool = identity
 
-{- EQ for Circuit Values (more or less) -}
+{- | Eq for `CircuitValue`s -}
 class ZkEq :: Type -> Constraint
 class ZkEq t where
-  zkEq :: t ->  t ->  Bool
+  zkEq :: t -> t ->  Bool
   zkAssertEq :: String -> t -> t -> Assertion
 
 infix 4 zkEq as #==
@@ -84,7 +135,7 @@ instance ZkEq Hash where
 
 
 
-{- Ord for Circuit Values -}
+{- | Ord for Circuit Values -}
 class ZkOrd :: Type -> Constraint
 class ZkEq t <= ZkOrd t where
   zkLT :: t -> t ->  Bool
