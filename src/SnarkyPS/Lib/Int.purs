@@ -41,11 +41,11 @@ foreign import fromFieldU64 :: Field -> U64
 
 foreign import toFieldU64 :: U64 -> Field
 
-foreign import toInputU64 :: U64 -> HashInput
+-- foreign import toInputU64 :: U64 -> HashInput
 
-foreign import toJSONU64 :: U64 -> JSON
+-- foreign import toJSONU64 :: U64 -> JSON
 
-foreign import fromJSONU64 :: JSON ->  U64
+-- foreign import fromJSONU64 :: JSON ->  U64
 
 foreign import divModU64 :: U64 -> U64 -> (DivModResult U64)
 

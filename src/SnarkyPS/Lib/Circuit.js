@@ -39,7 +39,3 @@ export function bindToConstant(field) {
 export function mkProvable (size) {
   return Provable.Array(Field,size)
 };
-
-export function provableSizeInFields(provable) {
-  return provable.sizeInFields();
-}
